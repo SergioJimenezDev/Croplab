@@ -56,6 +56,61 @@ public class SimulacionService {
         return simulacion;
     }
 
+    /**
+     * Avanza N días en una sola transacción. Mucho más rápido que llamar a avanzarDia N veces
+     * porque carga la simulación + eventos UNA VEZ y mantiene todo en memoria.
+     */
+    @Transactional
+    public EstadoDiario avanzarVariosDias(Long simulacionId, int n, Long userId) {
+        if (n < 1) throw new RuntimeException("El número de días debe ser al menos 1");
+        Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
+        if (!simulacion.getEstado().equals(Simulacion.Estado.en_curso)) {
+            throw new RuntimeException("La simulación no está en curso");
+        }
+
+        // Carga eventos UNA SOLA VEZ; los nuevos eventos generados los añadimos al cache.
+        List<Evento> eventosCache = new java.util.ArrayList<>(
+                eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacionId));
+        List<EstadoDiario> estadosBatch = new java.util.ArrayList<>();
+        List<Evento> eventosNuevos = new java.util.ArrayList<>();
+        EstadoDiario ultimoEstado = null;
+
+        for (int i = 0; i < n; i++) {
+            simulacion.setDiaActual(simulacion.getDiaActual() + 1);
+            EstadoDiario estado = calcularEstadoDiario(simulacion, eventosCache);
+            estadosBatch.add(estado);
+
+            simulacion.setSaludActual(estado.getSaludPlanta());
+            simulacion.setAlturaActual(estado.getAlturaCm());
+            simulacion.setHumedadSueloActual(estado.getHumedadSuelo());
+            simulacion.setEtapaFenologica(estado.getEtapaFenologica());
+
+            if (Boolean.TRUE.equals(simulacion.getEventosAleatorios()) && random.nextDouble() < 0.25) {
+                Evento nuevo = construirEventoAleatorio(simulacion);
+                eventosNuevos.add(nuevo);
+                eventosCache.add(nuevo);
+            }
+
+            ultimoEstado = estado;
+            // Si la planta murió, paramos el bucle (no tiene sentido avanzar más días)
+            if (simulacion.getEstado() == Simulacion.Estado.fallida) break;
+        }
+
+        // Persistencia en batch — un único viaje a BBDD por entidad
+        estadoDiarioRepository.saveAll(estadosBatch);
+        if (!eventosNuevos.isEmpty()) eventoRepository.saveAll(eventosNuevos);
+        actualizarIngresosEstimados(simulacion);
+        simulacionRepository.save(simulacion);
+
+        // Si la planta murió durante el batch, generamos el Resultado automáticamente
+        if (simulacion.getEstado() == Simulacion.Estado.fallida
+                && resultadoRepository.findByIdSimulacion(simulacionId).isEmpty()) {
+            finalizarSimulacion(simulacionId, userId);
+        }
+
+        return ultimoEstado;
+    }
+
     @Transactional
     public EstadoDiario avanzarDia(Long simulacionId, Long userId) {
         Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
@@ -112,6 +167,15 @@ public class SimulacionService {
     }
 
     private EstadoDiario calcularEstadoDiario(Simulacion simulacion) {
+        return calcularEstadoDiario(simulacion,
+                eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacion.getIdSimulacion()));
+    }
+
+    /**
+     * Versión optimizada: recibe la lista de eventos ya cargada para evitar 4+ queries
+     * por cada día simulado. Indispensable cuando se avanzan muchos días en batch.
+     */
+    private EstadoDiario calcularEstadoDiario(Simulacion simulacion, List<Evento> eventosCache) {
         EstadoDiario estado = new EstadoDiario();
         estado.setIdSimulacion(simulacion.getIdSimulacion());
         estado.setDia(simulacion.getDiaActual());
@@ -170,47 +234,43 @@ public class SimulacionService {
 
         // 3. ESTRÉS NUTRICIONAL (necesita fertilización periódica)
         boolean estresNutricional = false;
-        // Verificar si ha habido fertilización en los últimos 15 días
-        List<Evento> fertilizaciones = eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacion.getIdSimulacion())
-                .stream()
-                .filter(e -> e.getTipoEvento() == Evento.TipoEvento.fertilizacion)
-                .filter(e -> e.getDiaEvento() >= simulacion.getDiaActual() - 15)
-                .toList();
+        // Verificar si ha habido fertilización en los últimos 15 días (en el cache, sin query)
+        int diaActual = simulacion.getDiaActual();
+        boolean hayFertReciente = false;
+        for (Evento e : eventosCache) {
+            if (e.getTipoEvento() == Evento.TipoEvento.fertilizacion
+                    && e.getDiaEvento() >= diaActual - 15) { hayFertReciente = true; break; }
+        }
 
-        if (fertilizaciones.isEmpty() && simulacion.getDiaActual() > 15) {
+        if (!hayFertReciente && diaActual > 15) {
             penalizacionTotal += 2 + random.nextDouble() * 4; // -2 a -6
             estresNutricional = true;
         }
 
         // 4. NECESIDAD DE RIEGO (verificar riegos recientes)
-        List<Evento> riegos = eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacion.getIdSimulacion())
-                .stream()
-                .filter(e -> e.getTipoEvento() == Evento.TipoEvento.riego)
-                .filter(e -> e.getDiaEvento() >= simulacion.getDiaActual() - 3)
-                .toList();
+        boolean hayRiegoReciente = false;
+        for (Evento e : eventosCache) {
+            if (e.getTipoEvento() == Evento.TipoEvento.riego
+                    && e.getDiaEvento() >= diaActual - 3) { hayRiegoReciente = true; break; }
+        }
 
-        if (riegos.isEmpty() && humedadActual.compareTo(BigDecimal.valueOf(50)) < 0) {
+        if (!hayRiegoReciente && humedadActual.compareTo(BigDecimal.valueOf(50)) < 0) {
             penalizacionTotal += 3 + random.nextDouble() * 5; // -3 a -8
         }
 
-        // 5. EVENTOS NEGATIVOS PREVIOS (plagas, enfermedades, plagas específicas)
-        List<Evento> eventosNegativos = eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacion.getIdSimulacion())
-                .stream()
-                .filter(e -> esPlagaOEnfermedad(e.getTipoEvento()))
-                .filter(e -> e.getDiaEvento() >= simulacion.getDiaActual() - 10)
-                .toList();
-
-        for (Evento evento : eventosNegativos) {
-            // Verificar si hubo tratamiento o control biológico después
-            List<Evento> tratamientos = eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacion.getIdSimulacion())
-                    .stream()
-                    .filter(e -> e.getTipoEvento() == Evento.TipoEvento.tratamiento_fitosanitario ||
-                                 e.getTipoEvento() == Evento.TipoEvento.control_biologico)
-                    .filter(e -> e.getDiaEvento() > evento.getDiaEvento() && e.getDiaEvento() <= simulacion.getDiaActual())
-                    .toList();
-
-            if (tratamientos.isEmpty()) {
-                // No hubo tratamiento, la plaga/enfermedad sigue activa
+        // 5. EVENTOS NEGATIVOS PREVIOS (plagas/enfermedades sin tratar en los últimos 10 días)
+        for (Evento evento : eventosCache) {
+            if (!esPlagaOEnfermedad(evento.getTipoEvento())) continue;
+            if (evento.getDiaEvento() < diaActual - 10) continue;
+            // Verificar si hubo tratamiento después en el mismo cache
+            boolean tratado = false;
+            for (Evento e : eventosCache) {
+                if ((e.getTipoEvento() == Evento.TipoEvento.tratamiento_fitosanitario
+                        || e.getTipoEvento() == Evento.TipoEvento.control_biologico)
+                        && e.getDiaEvento() > evento.getDiaEvento()
+                        && e.getDiaEvento() <= diaActual) { tratado = true; break; }
+            }
+            if (!tratado) {
                 penalizacionTotal += 4 + random.nextDouble() * 8; // -4 a -12 por evento sin tratar
             }
         }
@@ -264,6 +324,11 @@ public class SimulacionService {
     }
 
     private void generarEventoAleatorio(Simulacion simulacion) {
+        eventoRepository.save(construirEventoAleatorio(simulacion));
+    }
+
+    /** Construye un evento aleatorio sin persistirlo. Útil para batch en avanzarVariosDias. */
+    private Evento construirEventoAleatorio(Simulacion simulacion) {
         Evento evento = new Evento();
         evento.setIdSimulacion(simulacion.getIdSimulacion());
         evento.setDiaEvento(simulacion.getDiaActual());
@@ -309,7 +374,7 @@ public class SimulacionService {
         evento.setDescripcion(descripcionPorDefecto(tipo));
         evento.setIntensidad(intensidadPorDefecto(tipo));
 
-        eventoRepository.save(evento);
+        return evento;
     }
 
     private String descripcionPorDefecto(Evento.TipoEvento tipo) {

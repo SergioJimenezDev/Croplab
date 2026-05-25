@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState, Suspense } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button, Loading, EconomyPanel, EventEffects } from '../components/common';
 import { simulacionService } from '../services/simulacionService';
@@ -14,7 +14,11 @@ import {
 import NotificationPanel from '../components/NotificationPanel';
 import InteractiveGuide from '../components/InteractiveGuide';
 import EventVFX, { VFXEffect } from '../components/EventVFX';
-import FarmScene from '../components/scene/FarmScene';
+
+// Lazy load del FarmScene — la escena 3D + three.js + drei pesa ~1 MB.
+// Cargándola solo al entrar a la simulación reducimos drásticamente el bundle inicial
+// y el time-to-interactive del login/dashboard.
+const FarmScene = React.lazy(() => import('../components/scene/FarmScene'));
 import {
   LineChart,
   Line,
@@ -251,6 +255,20 @@ const SimulationView: React.FC = () => {
     descripcion: ''
   });
 
+  // Memos derivados que dependen de eventos / simulacion.
+  // IMPORTANTE: estos hooks tienen que estar antes de cualquier early-return
+  // (los hooks deben llamarse en el mismo orden en cada render).
+  const eventosActivosMemo = React.useMemo(
+    () => calcularEventosActivos(eventos, simulacion?.diaActual ?? 0),
+    [eventos, simulacion?.diaActual]
+  );
+  const baseVFXMemo: VFXEffect | null = React.useMemo(() => {
+    if (eventosActivosMemo.length === 0) return null;
+    return eventosActivosMemo.reduce(
+      (m, e) => e.evento.diaEvento > m.evento.diaEvento ? e : m
+    ).evento.tipoEvento as VFXEffect;
+  }, [eventosActivosMemo]);
+
   useEffect(() => {
     loadSimulationData();
   }, [id]);
@@ -323,9 +341,8 @@ const SimulationView: React.FC = () => {
 
     setIsAdvancing(true);
     try {
-      for (let i = 0; i < dias; i++) {
-        await simulacionService.avanzarDia(parseInt(id));
-      }
+      // Una sola petición HTTP en lugar de N (evita el cold start + latencia × N)
+      await simulacionService.avanzarVariosDias(parseInt(id), dias);
       await loadSimulationData();
     } catch (error: any) {
       alert(error.message || 'Error al avanzar días');
@@ -440,12 +457,10 @@ const SimulationView: React.FC = () => {
   const ultimoEstado = historial.length > 0 ? historial[historial.length - 1] : null;
   const saludColor = simulacion.saludActual > 80 ? '#5fae45' : simulacion.saludActual > 50 ? '#ffa726' : '#e53935';
 
-  // VFX base continuo: refleja el evento ACTIVO más reciente (persistente y sin resolver).
-  // Cuando no hay activos, no se muestra nada (a menos que haya un flashVFX temporal).
-  const eventosActivosNow = calcularEventosActivos(eventos, simulacion.diaActual);
-  const baseVFX: VFXEffect | null = eventosActivosNow.length > 0
-    ? eventosActivosNow.reduce((m, e) => e.evento.diaEvento > m.evento.diaEvento ? e : m).evento.tipoEvento as VFXEffect
-    : null;
+  // Cálculos derivados — los hooks de memo ya están arriba (antes de los early returns).
+  // Aquí simplemente accedemos a los memos definidos al principio del componente.
+  const eventosActivosNow = eventosActivosMemo;
+  const baseVFX: VFXEffect | null = baseVFXMemo;
   // El flash temporal tiene prioridad; cuando termina, vuelve el base (o null).
   const currentVFX: VFXEffect | null = flashVFX ?? baseVFX;
   const currentVFXDuration: number | null = flashVFX ? 4000 : null;
@@ -454,7 +469,9 @@ const SimulationView: React.FC = () => {
     <div className={`sim-v2 ${sidePanelFullscreen ? 'sim-v2-fullscreen-active' : ''}`}>
       {/* Fondo 3D */}
       <div className="sim-v2-scene">
-        <FarmScene simulacion={simulacion} vfxEvent={currentVFX} />
+        <Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#cfe7ff', color: '#1c2421', fontFamily: 'var(--font-hand, sans-serif)', fontSize: '1.5rem' }}>Cargando escena…</div>}>
+          <FarmScene simulacion={simulacion} vfxEvent={currentVFX} />
+        </Suspense>
       </div>
 
       {/* Header glass */}

@@ -70,6 +70,21 @@ public class SimulacionController {
         }
     }
 
+    /** Avanza N días en una sola transacción (mucho más rápido que N llamadas a avanzar-dia). */
+    @PostMapping("/{id}/avanzar-dias")
+    public ResponseEntity<ApiResponse<EstadoDiario>> avanzarVariosDias(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int n,
+            @AuthenticationPrincipal UserPrincipal userPrincipal) {
+        try {
+            EstadoDiario ultimoEstado = simulacionService.avanzarVariosDias(id, n, userPrincipal.getId());
+            return ResponseEntity.ok(ApiResponse.success(n + " días avanzados", ultimoEstado));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     @GetMapping("/{id}/historial")
     public ResponseEntity<ApiResponse<List<EstadoDiario>>> obtenerHistorial(
             @PathVariable Long id,

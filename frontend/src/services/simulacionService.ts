@@ -86,6 +86,22 @@ export const simulacionService = {
   },
 
   /**
+   * Avanzar N días en una sola petición HTTP (mucho más rápido en el plan gratis
+   * de Render que llamar N veces a /avanzar-dia).
+   */
+  avanzarVariosDias: async (id: number, n: number): Promise<EstadoDiario> => {
+    try {
+      const response = await api.post<ApiResponse<EstadoDiario>>(
+        `/simulaciones/${id}/avanzar-dias?n=${n}`
+      );
+      if (response.success && response.data) return response.data;
+      throw new Error(response.message || 'Error al avanzar días');
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || 'Error al avanzar días');
+    }
+  },
+
+  /**
    * Obtener historial diario de la simulación
    */
   obtenerHistorial: async (simulacionId: number): Promise<EstadoDiario[]> => {
