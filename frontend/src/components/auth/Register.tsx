@@ -3,6 +3,14 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button, Input, Card, CardBody } from '../common';
 import { RolUsuario } from '../../types';
+import {
+  AuthLogoEmblem,
+  DecoMagnifier,
+  DecoDrop,
+  DecoFlask,
+  DecoLeaves,
+  DecoArrow
+} from './AuthDecorations';
 import './Auth.css';
 
 const Register: React.FC = () => {
@@ -78,17 +86,26 @@ const Register: React.FC = () => {
 
   return (
     <div className="auth-container">
+      {/* Decoraciones de cuaderno */}
+      <div className="auth-deco auth-deco-magnifier"><DecoMagnifier /></div>
+      <div className="auth-deco auth-deco-drop"><DecoDrop /></div>
+      <div className="auth-deco auth-deco-flask"><DecoFlask /></div>
+      <div className="auth-deco auth-deco-leaves"><DecoLeaves /></div>
+      <div className="auth-deco auth-deco-arrow"><DecoArrow /></div>
+      <div className="auth-deco auth-deco-arrow-right"><DecoArrow flip /></div>
+
       <div className="auth-content">
         <div className="auth-logo">
-          <h1>🌱 CropLab</h1>
-          <p>Simulador Educativo de Cultivos</p>
+          <div className="auth-logo-emblem"><AuthLogoEmblem /></div>
+          <h1>CropLab</h1>
+          <p>Simulador educativo de cultivos</p>
         </div>
 
         <Card className="auth-card">
           <CardBody>
-            <h2 className="auth-title">Crear Cuenta</h2>
+            <h2 className="auth-title">Crear cuenta</h2>
             <p className="auth-subtitle">
-              Regístrate para empezar a simular tus cultivos
+              Abre tu propio cuaderno de experimentos
             </p>
 
             {errors.submit && (
@@ -180,15 +197,16 @@ const Register: React.FC = () => {
                 fullWidth
               />
 
-              <Button
-                type="submit"
-                variant="primary"
-                size="lg"
-                fullWidth
-                isLoading={isLoading}
-              >
-                Crear Cuenta
-              </Button>
+              <div className="auth-submit-wrap">
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="lg"
+                  isLoading={isLoading}
+                >
+                  Crear cuenta
+                </Button>
+              </div>
             </form>
 
             <div className="auth-footer">

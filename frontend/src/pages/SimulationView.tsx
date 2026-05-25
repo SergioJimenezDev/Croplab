@@ -82,7 +82,18 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   erosion_suelo: { emoji: '⛰️', nombre: 'Erosión del suelo', acciones: ['compostaje', 'mulching'], accionTexto: 'Aplica compostaje o mulching' },
 
   // Otros
-  contaminacion_quimica: { emoji: '☣️', nombre: 'Contaminación química', acciones: ['compostaje', 'fertilizacion'], accionTexto: 'Aplica compostaje y refuerza con fertilización' }
+  contaminacion_quimica: { emoji: '☣️', nombre: 'Contaminación química', acciones: ['compostaje', 'fertilizacion'], accionTexto: 'Aplica compostaje y refuerza con fertilización' },
+
+  // Climáticos persistentes
+  polvo_sahariano: { emoji: '🏜️', nombre: 'Calima sahariana', acciones: ['riego'], accionTexto: 'Riega por aspersión para limpiar las hojas' },
+  niebla_persistente: { emoji: '🌫️', nombre: 'Niebla densa persistente', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento preventivo de hongos' },
+  lluvia_acida: { emoji: '☢️', nombre: 'Lluvia ácida', acciones: ['enmienda_calcica', 'riego'], accionTexto: 'Aplica enmienda cálcica y riega para lavar las hojas' },
+  sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego'], accionTexto: 'Riega abundantemente' },
+  ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching'], accionTexto: 'Riega y considera mulching para retener humedad' },
+  ola_radiacion_uv: { emoji: '🛸', nombre: 'Radiación UV alta', acciones: ['instalacion_malla', 'riego'], accionTexto: 'Instala malla de sombreo y riega' },
+
+  // Técnicos persistentes
+  apagon_riego: { emoji: '🔌', nombre: 'Apagón del sistema de riego', acciones: ['riego'], accionTexto: 'Riega manualmente hasta que se restaure el sistema' }
 };
 
 const VENTANA_DIAS_ACTIVO = 10;
@@ -94,10 +105,10 @@ interface EventoActivo {
 
 const calcularEventosActivos = (eventos: Evento[], diaActual: number): EventoActivo[] => {
   const activos: EventoActivo[] = [];
-  // Recorrer en orden cronológico; nos quedamos con la última ocurrencia de cada tipo sin tratar
+  // Recorrer en orden cronológico; nos quedamos con la última ocurrencia de cada tipo sin tratar.
+  // Incluye tanto eventos del sistema como aplicados manualmente por el usuario.
   const masRecientePorTipo = new Map<string, Evento>();
   eventos.forEach(ev => {
-    if (ev.origen !== 'sistema') return;
     const info = EVENTOS_PERSISTENTES[ev.tipoEvento];
     if (!info) return;
     if (ev.diaEvento < diaActual - VENTANA_DIAS_ACTIVO) return;
@@ -211,8 +222,19 @@ const SimulationView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [modalClosing, setModalClosing] = useState(false);
+
+  // Cierra el modal con animación de salida (~280 ms)
+  const closeEventModal = () => {
+    setModalClosing(true);
+    setTimeout(() => {
+      setShowEventModal(false);
+      setModalClosing(false);
+    }, 280);
+  };
   const [selectedTab, setSelectedTab] = useState<'detalles' | 'alertas' | 'graficos' | 'eventos' | 'economia'>('alertas');
   const [sidePanelOpen, setSidePanelOpen] = useState<boolean>(true);
+  const [sidePanelFullscreen, setSidePanelFullscreen] = useState<boolean>(false);
   // VFX en dos capas:
   //  - flashVFX: efecto temporal (4 s) que aparece al disparar un evento concreto
   //    (acción del usuario, o catástrofe puntual del sistema). Tiene prioridad.
@@ -326,7 +348,7 @@ const SimulationView: React.FC = () => {
       const tipoAplicado = nuevoEvento.tipoEvento;
       await simulacionService.aplicarEvento(parseInt(id), eventoData);
       await loadSimulationData();
-      setShowEventModal(false);
+      closeEventModal();
       setNuevoEvento({
         tipoEvento: 'riego',
         cantidad: 0,
@@ -336,6 +358,12 @@ const SimulationView: React.FC = () => {
       if (tipoAplicado) {
         // Acción manual: mostrar flash temporal del efecto que se acaba de aplicar.
         setFlashVFX(tipoAplicado as VFXEffect);
+        // Si el evento aplicado es persistente (plaga, sequía, enfermedad...), abrir el
+        // panel de alertas en la pestaña "Alertas" para que el usuario lo vea de inmediato.
+        if (EVENTOS_PERSISTENTES[tipoAplicado]) {
+          setSidePanelOpen(true);
+          setSelectedTab('alertas');
+        }
       }
     } catch (error: any) {
       alert(error.message || 'Error al aplicar evento');
@@ -405,7 +433,7 @@ const SimulationView: React.FC = () => {
   }
 
   const cultivoConfig = CULTIVOS_CONFIG[simulacion.tipoCultivo];
-  const progresoCiclo = (simulacion.diaActual / cultivoConfig.cicloVidaDias) * 100;
+  const progresoCiclo = (simulacion.diaActual / (simulacion.diasMaximos ?? cultivoConfig.cicloVidaDias)) * 100;
 
   const eventosAleatoriosOn = simulacion.eventosAleatorios ?? true;
   const modoInvencibleOn = simulacion.modoInvencible ?? false;
@@ -423,10 +451,10 @@ const SimulationView: React.FC = () => {
   const currentVFXDuration: number | null = flashVFX ? 4000 : null;
 
   return (
-    <div className="sim-v2">
+    <div className={`sim-v2 ${sidePanelFullscreen ? 'sim-v2-fullscreen-active' : ''}`}>
       {/* Fondo 3D */}
       <div className="sim-v2-scene">
-        <FarmScene simulacion={simulacion} />
+        <FarmScene simulacion={simulacion} vfxEvent={currentVFX} />
       </div>
 
       {/* Header glass */}
@@ -440,7 +468,7 @@ const SimulationView: React.FC = () => {
               <span className="sim-v2-dot">•</span>
               <span>{simulacion.superficieHectareas} ha</span>
               <span className="sim-v2-dot">•</span>
-              <span className={`sim-v2-pill sim-v2-pill-${simulacion.estado}`}>{simulacion.estado}</span>
+              <span className={`sim-v2-pill sim-v2-pill-${simulacion.estado}`}>{simulacion.estado.replace(/_/g, ' ').toUpperCase()}</span>
             </div>
           </div>
         </div>
@@ -510,22 +538,41 @@ const SimulationView: React.FC = () => {
         <div className="sim-v2-stat sim-v2-stat-day">
           <div className="sim-v2-stat-meta">
             <span className="sim-v2-stat-label">Día</span>
-            <span className="sim-v2-stat-value sim-v2-day">{simulacion.diaActual}<small>/{cultivoConfig.cicloVidaDias}</small></span>
+            <span className="sim-v2-stat-value sim-v2-day">{simulacion.diaActual}<small>/{(simulacion.diasMaximos ?? cultivoConfig.cicloVidaDias)}</small></span>
           </div>
         </div>
       </div>
 
-      {/* Side panel */}
-      <aside className={`sim-v2-side ${sidePanelOpen ? 'open' : ''}`}>
-        <button className="sim-v2-side-toggle" onClick={() => setSidePanelOpen(o => !o)} title="Detalles">
-          {sidePanelOpen ? '›' : '‹'}
+      {/* Botón toggle del panel — siempre fijo al viewport, se desplaza con el panel */}
+      <button
+        className={`sim-v2-panel-toggle ${sidePanelOpen ? 'open' : ''} ${sidePanelFullscreen ? 'fullscreen' : ''}`}
+        onClick={() => setSidePanelOpen(o => !o)}
+        title={sidePanelOpen ? 'Cerrar panel' : 'Abrir panel'}
+        aria-label={sidePanelOpen ? 'Cerrar panel' : 'Abrir panel'}
+      >
+        {sidePanelOpen ? '›' : '‹'}
+      </button>
+
+      {/* Botón pantalla completa / salir — visible solo cuando panel abierto */}
+      {sidePanelOpen && (
+        <button
+          className={`sim-v2-panel-fullscreen ${sidePanelFullscreen ? 'exit' : ''}`}
+          onClick={() => setSidePanelFullscreen(f => !f)}
+          title={sidePanelFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+        >
+          {sidePanelFullscreen ? <><span>✕</span><span>Cerrar pantalla completa</span></> : '🗖'}
         </button>
-        <div className="sim-v2-side-tabs">
+      )}
+
+      {/* Tabs laterales fixed al viewport */}
+      {!sidePanelFullscreen && (
+        <div className={`sim-v2-side-tabs ${sidePanelOpen ? 'open' : ''}`}>
           {(['detalles', 'alertas', 'graficos', 'eventos', 'economia'] as const).map(t => (
             <button
               key={t}
               className={`sim-v2-side-tab ${selectedTab === t ? 'active' : ''}`}
               onClick={() => { setSidePanelOpen(true); setSelectedTab(t as any); }}
+              title={t}
             >
               {t === 'detalles' && '📋'}
               {t === 'alertas' && '⚠️'}
@@ -535,9 +582,12 @@ const SimulationView: React.FC = () => {
             </button>
           ))}
         </div>
-        {sidePanelOpen && (
-          <div className="sim-v2-side-content">
-            {selectedTab === 'alertas' && (
+      )}
+
+      {/* Side panel */}
+      <aside className={`sim-v2-side ${sidePanelOpen ? 'open' : ''} ${sidePanelFullscreen ? 'fullscreen' : ''}`}>
+        <div className="sim-v2-side-content" aria-hidden={!sidePanelOpen}>
+          {selectedTab === 'alertas' && (
               <>
                 {(() => {
                   const activos = calcularEventosActivos(eventos, simulacion.diaActual);
@@ -651,6 +701,109 @@ const SimulationView: React.FC = () => {
                         <Line yAxisId="precip" type="monotone" dataKey="precipitacionMm" stroke="#03a9f4" strokeWidth={2} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
+
+                    <h4>Estrés acumulado (días)</h4>
+                    {(() => {
+                      const estresAcum = historial.map((e, i) => {
+                        let h = 0, t = 0, n = 0;
+                        for (let j = 0; j <= i; j++) {
+                          if (historial[j].estresHidrico) h++;
+                          if (historial[j].estresTermico) t++;
+                          if (historial[j].estresNutricional) n++;
+                        }
+                        return { dia: e.dia, Hídrico: h, Térmico: t, Nutricional: n };
+                      });
+                      return (
+                        <ResponsiveContainer width="100%" height={180}>
+                          <AreaChart data={estresAcum}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="dia" />
+                            <YAxis />
+                            <Tooltip />
+                            <Legend />
+                            <Area type="monotone" dataKey="Hídrico" stackId="1" stroke="#03a9f4" fill="#03a9f455" />
+                            <Area type="monotone" dataKey="Térmico" stackId="1" stroke="#ff9800" fill="#ff980055" />
+                            <Area type="monotone" dataKey="Nutricional" stackId="1" stroke="#9c27b0" fill="#9c27b055" />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
+
+                    <h4>Salud media móvil 7 días</h4>
+                    {(() => {
+                      const promedio = historial.map((e, i) => {
+                        const window = historial.slice(Math.max(0, i - 6), i + 1);
+                        const avg = window.reduce((a, x) => a + Number(x.saludPlanta), 0) / window.length;
+                        return { dia: e.dia, media: Number(avg.toFixed(1)), instantanea: Number(e.saludPlanta) };
+                      });
+                      return (
+                        <ResponsiveContainer width="100%" height={180}>
+                          <LineChart data={promedio}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="dia" />
+                            <YAxis domain={[0, 100]} />
+                            <Tooltip />
+                            <Legend />
+                            <Line type="monotone" dataKey="instantanea" stroke="#bbb" strokeWidth={1.5} dot={false} name="Día a día" />
+                            <Line type="monotone" dataKey="media" stroke="#5fae45" strokeWidth={2.5} dot={false} name="Media 7 d" />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
+
+                    <h4>Gasto acumulado vs presupuesto</h4>
+                    {(() => {
+                      const presupuesto = simulacion.presupuestoInicial ?? 1000;
+                      const gastoPorDia = new Map<number, number>();
+                      eventos.forEach(ev => {
+                        if (ev.costeEuros && ev.costeEuros > 0) {
+                          gastoPorDia.set(ev.diaEvento, (gastoPorDia.get(ev.diaEvento) ?? 0) + ev.costeEuros);
+                        }
+                      });
+                      let acum = 0;
+                      const data = historial.map(e => {
+                        acum += gastoPorDia.get(e.dia) ?? 0;
+                        return { dia: e.dia, Gasto: Number(acum.toFixed(2)), Presupuesto: presupuesto };
+                      });
+                      return (
+                        <ResponsiveContainer width="100%" height={180}>
+                          <AreaChart data={data}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="dia" />
+                            <YAxis />
+                            <Tooltip formatter={(v: any) => `€${Number(v).toFixed(2)}`} />
+                            <Legend />
+                            <Area type="monotone" dataKey="Gasto" stroke="#e53935" fill="#e5393555" />
+                            <Line type="monotone" dataKey="Presupuesto" stroke="#1565c0" strokeWidth={2} dot={false} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
+
+                    <h4>Eventos por día</h4>
+                    {(() => {
+                      const conteoPorDia: Record<number, { dia: number; Sistema: number; Usuario: number }> = {};
+                      historial.forEach(e => { conteoPorDia[e.dia] = { dia: e.dia, Sistema: 0, Usuario: 0 }; });
+                      eventos.forEach(ev => {
+                        if (!conteoPorDia[ev.diaEvento]) conteoPorDia[ev.diaEvento] = { dia: ev.diaEvento, Sistema: 0, Usuario: 0 };
+                        if (ev.origen === 'sistema') conteoPorDia[ev.diaEvento].Sistema++;
+                        else conteoPorDia[ev.diaEvento].Usuario++;
+                      });
+                      const data = Object.values(conteoPorDia).sort((a, b) => a.dia - b.dia);
+                      return (
+                        <ResponsiveContainer width="100%" height={180}>
+                          <LineChart data={data}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="dia" />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Legend />
+                            <Line type="stepAfter" dataKey="Sistema" stroke="#c62828" strokeWidth={2} dot={false} />
+                            <Line type="stepAfter" dataKey="Usuario" stroke="#2e7d32" strokeWidth={2} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      );
+                    })()}
                   </>
                 ) : (
                   <p>Avanza días para ver gráficos.</p>
@@ -673,10 +826,13 @@ const SimulationView: React.FC = () => {
               </div>
             )}
             {selectedTab === 'economia' && (
-              <EconomyPanel simulacionId={simulacion.idSimulacion!} presupuestoActual={simulacion.presupuestoActual} />
+              <EconomyPanel
+                simulacionId={simulacion.idSimulacion!}
+                presupuestoActual={simulacion.presupuestoActual}
+                refreshKey={simulacion.diaActual + eventos.length}
+              />
             )}
-          </div>
-        )}
+        </div>
       </aside>
 
       {/* Dock inferior-izquierda: ajustes de partida */}
@@ -790,11 +946,11 @@ const SimulationView: React.FC = () => {
 
       {/* Modal de Eventos */}
       {showEventModal && (
-        <div className="modal-overlay" onClick={() => setShowEventModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className={`modal-overlay ${modalClosing ? 'closing' : ''}`}>
+          <div className={`modal-content ${modalClosing ? 'closing' : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Aplicar Evento</h2>
-              <button className="close-btn" onClick={() => setShowEventModal(false)}>×</button>
+              <button className="close-btn" onClick={closeEventModal}>×</button>
             </div>
 
             <div className="modal-body">
@@ -893,7 +1049,7 @@ const SimulationView: React.FC = () => {
             </div>
 
             <div className="modal-footer">
-              <Button variant="secondary" onClick={() => setShowEventModal(false)}>
+              <Button variant="secondary" onClick={closeEventModal}>
                 Cancelar
               </Button>
               <Button onClick={aplicarEvento}>

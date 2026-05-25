@@ -31,6 +31,13 @@ public class SimulacionService {
     @Transactional
     public Simulacion crearSimulacion(Simulacion simulacion, Long userId) {
         simulacion.setIdUsuario(userId);
+        // El presupuesto actual arranca igual al inicial elegido por el usuario
+        if (simulacion.getPresupuestoInicial() != null) {
+            simulacion.setPresupuestoActual(simulacion.getPresupuestoInicial());
+        }
+        if (simulacion.getDiasMaximos() == null || simulacion.getDiasMaximos() < 1) {
+            simulacion.setDiasMaximos(180);
+        }
         return simulacionRepository.save(simulacion);
     }
 
@@ -76,9 +83,32 @@ public class SimulacionService {
             generarEventoAleatorio(simulacion);
         }
 
+        // Recalcular ingresos estimados según salud y etapa actuales
+        actualizarIngresosEstimados(simulacion);
+
         simulacionRepository.save(simulacion);
 
+        // Si la planta murió, generar Resultado automáticamente para que aparezca en comparativa
+        if (simulacion.getEstado() == Simulacion.Estado.fallida
+                && resultadoRepository.findByIdSimulacion(simulacionId).isEmpty()) {
+            finalizarSimulacion(simulacionId, userId);
+        }
+
         return estadoDiario;
+    }
+
+    private void actualizarIngresosEstimados(Simulacion simulacion) {
+        double[] info = CULTIVO_DATA.getOrDefault(simulacion.getTipoCultivo(), new double[]{4000, 0.30});
+        double rendimientoPotencial = info[0];
+        double precioKg = info[1];
+        double factorSalud = simulacion.getSaludActual().doubleValue() / 100.0;
+        double factorEtapa = calcularFactorEtapa(simulacion.getEtapaFenologica());
+        double rendimientoProyectado = rendimientoPotencial * factorSalud * factorEtapa;
+        BigDecimal ingreso = BigDecimal.valueOf(rendimientoProyectado)
+                .multiply(BigDecimal.valueOf(precioKg))
+                .multiply(simulacion.getSuperficieHectareas())
+                .setScale(2, RoundingMode.HALF_UP);
+        simulacion.setIngresosEstimados(ingreso);
     }
 
     private EstadoDiario calcularEstadoDiario(Simulacion simulacion) {
@@ -823,7 +853,11 @@ public class SimulacionService {
     public Resultado finalizarSimulacion(Long simulacionId, Long userId) {
         Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
 
-        simulacion.setEstado(Simulacion.Estado.completada);
+        // Solo cambiamos a "completada" si todavía estaba en curso.
+        // Si la planta murió y la simulación ya está marcada como "fallida", la mantenemos.
+        if (simulacion.getEstado() == Simulacion.Estado.en_curso) {
+            simulacion.setEstado(Simulacion.Estado.completada);
+        }
         simulacionRepository.save(simulacion);
 
         // Obtener datos reales del historial

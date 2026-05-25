@@ -141,6 +141,9 @@ public class Simulacion {
     @Column(name = "modo_invencible")
     private Boolean modoInvencible = false;
 
+    @Column(name = "dias_maximos")
+    private Integer diasMaximos = 180;
+
     // Enums
     public enum Estado {
         en_curso, completada, fallida, pausada

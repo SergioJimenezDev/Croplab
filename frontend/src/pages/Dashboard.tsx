@@ -6,6 +6,11 @@ import { simulacionService } from '../services/simulacionService';
 import { Button, Card, CardHeader, CardTitle, CardBody, Loading } from '../components/common';
 import './Dashboard.css';
 
+const formatEstado = (estado: string) => estado.replace(/_/g, ' ').toUpperCase();
+
+const colorSalud = (salud: number) =>
+  salud >= 70 ? '#2e7d32' : salud >= 40 ? '#ed6c02' : '#c62828';
+
 const Dashboard: React.FC = () => {
   const { usuario, logout } = useAuth();
   const navigate = useNavigate();
@@ -117,17 +122,18 @@ const Dashboard: React.FC = () => {
                 {simulaciones.map((sim) => (
                   <div
                     key={sim.idSimulacion}
-                    className="simulation-item"
+                    className={`simulation-item simulation-item-${sim.estado}`}
                     onClick={() => navigate(`/simulation/${sim.idSimulacion}`)}
                   >
-                    <div>
+                    <div className="simulation-item-main">
                       <h4>{sim.nombreSimulacion}</h4>
                       <p>
-                        {sim.tipoCultivo} - Día {sim.diaActual} - {sim.estado}
+                        {sim.tipoCultivo} · Día {sim.diaActual}
+                        <span className={`sim-pill sim-pill-${sim.estado}`}>{formatEstado(sim.estado)}</span>
                       </p>
                     </div>
-                    <div className="simulation-health">
-                      Salud: {sim.saludActual.toFixed(1)}%
+                    <div className="simulation-health" style={{ color: colorSalud(sim.saludActual) }}>
+                      Salud: <strong>{sim.saludActual.toFixed(1)}%</strong>
                     </div>
                   </div>
                 ))}

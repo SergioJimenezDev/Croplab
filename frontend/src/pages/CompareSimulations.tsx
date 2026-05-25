@@ -49,7 +49,8 @@ const CompareSimulations: React.FC = () => {
         simulacionService.obtenerComparativa()
       ]);
 
-      setSimulaciones(sims.filter(s => s.estado === 'completada'));
+      // Incluimos completadas Y fallidas para poder comparar cualquier resultado
+      setSimulaciones(sims.filter(s => s.estado === 'completada' || s.estado === 'fallida'));
 
       const resultadosConNombre = results.map(r => {
         const sim = sims.find(s => s.idSimulacion === r.idSimulacion);

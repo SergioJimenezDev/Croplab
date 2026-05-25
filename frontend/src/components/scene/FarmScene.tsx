@@ -18,6 +18,9 @@ const makeRng = (seed: number) => {
 
 interface FarmSceneProps {
   simulacion: Simulacion;
+  /** Si está activo un VFX (efecto visual de evento), pásalo para que la escena reaccione
+      con objetos 3D extra (p. ej. el modelo de tsunami para inundación). */
+  vfxEvent?: string | null;
 }
 
 // ============================================================
@@ -202,23 +205,52 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
     return rng() * Math.PI * 2;
   }, [seed]);
 
+  // === VARIABILIDAD INDIVIDUAL ===
+  // Cada planta tiene su propio "ruido" estable derivado del seed. Eso significa que
+  // dentro de un mismo campo unas plantas estarán más sanas/altas/desarrolladas que otras,
+  // como en una parcela real.
+  const variacion = useMemo(() => {
+    const rng = makeRng(Math.round(seed * 1000) + 71);
+    return {
+      saludOffset: (rng() - 0.5) * 30,        // ±15 de salud
+      alturaFactor: 0.78 + rng() * 0.42,       // 0.78 .. 1.20 (variación de tamaño)
+      hue: (rng() - 0.5) * 0.18,               // sesgo de tono (más amarillenta o más verde)
+      crecimiento: 0.85 + rng() * 0.3,         // unas crecen un poco más rápido que otras
+      seca: rng() < 0.18                       // ~18% de plantas son "más débiles" de origen
+    };
+  }, [seed]);
+
+  // Salud percibida individual (la global ± offset, clamp 0..100)
+  const saludIndividual = Math.max(0, Math.min(100, salud + variacion.saludOffset));
+
   const arche = archetype(cultivo);
   const factorEtapa = alturaPorEtapa(etapa);
-  const altura = Math.max(0.15, Math.min(2.5, (alturaCm / 100) * 1.4 + 0.25)) * factorEtapa;
+  const altura = Math.max(0.12, Math.min(2.6, (alturaCm / 100) * 1.4 + 0.25)) * factorEtapa * variacion.alturaFactor * variacion.crecimiento;
 
-  // Tamaño general del follaje crece con etapa
-  const follajeFactor = factorEtapa; // 0.18 (germinación) → 1.1 (cosecha)
+  // Tamaño general del follaje crece con etapa, también con variación individual
+  const follajeFactor = factorEtapa * variacion.crecimiento;
 
-  const baseColor = useMemo(() => follajeColor(salud, cultivo), [salud, cultivo]);
+  // Color base con sesgo individual: algunas plantas más amarillentas (variacion.hue + lerp con marrón/seca)
+  const baseColor = useMemo(() => {
+    const c = follajeColor(saludIndividual, cultivo);
+    // Sesgo individual de tono
+    if (variacion.hue > 0) {
+      c.lerp(new THREE.Color('#d4a857'), Math.min(0.35, variacion.hue));
+    } else {
+      c.lerp(new THREE.Color('#2c5e1f'), Math.min(0.25, -variacion.hue));
+    }
+    // Plantas "débiles" naturalmente: tono más apagado
+    if (variacion.seca) c.lerp(new THREE.Color('#7a5a2b'), 0.3);
+    return c;
+  }, [saludIndividual, cultivo, variacion]);
   const colorFruto = useMemo(() => frutoColor(cultivo), [cultivo]);
 
-  // Estado de enfermedad / madurez visual.
-  // Niveles de "caída" por salud (escalones a 75/50/25):
+  // Estado de enfermedad / madurez visual basado en la SALUD INDIVIDUAL.
   //   nivel 0 (salud >= 75)  → erguida
   //   nivel 1 (50 ≤ salud < 75) → ligeramente caída
   //   nivel 2 (25 ≤ salud < 50) → bastante caída
   //   nivel 3 (salud < 25)   → muy caída (casi tumbada)
-  const droopLevel = salud >= 75 ? 0 : salud >= 50 ? 1 : salud >= 25 ? 2 : 3;
+  const droopLevel = saludIndividual >= 75 ? 0 : saludIndividual >= 50 ? 1 : saludIndividual >= 25 ? 2 : 3;
   const droopAmount = [0, 0.22, 0.55, 0.95][droopLevel];
   const enferma = droopLevel >= 1;        // se inclinan + aparecen manchas leves
   const muyEnferma = droopLevel >= 2;     // color amarillento, más manchas
@@ -586,6 +618,776 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
 };
 
 // ============================================================
+// Tsunami / Inundación — pared de agua que cruza la parcela
+// ============================================================
+
+interface TsunamiWaveProps {
+  active: boolean;
+  durationSec?: number;
+}
+
+const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 4 }) => {
+  const wallRef = useRef<THREE.Group>(null);
+  const floodRef = useRef<THREE.Mesh>(null);
+  const splashRef = useRef<THREE.Group>(null);
+  const startTimeRef = useRef<number | null>(null);
+
+  // Espuma estable en la cresta (no se regenera en cada frame)
+  const foamPositions = useMemo(() => {
+    const rng = makeRng(424242);
+    return Array.from({ length: 28 }).map((_, i) => ({
+      x: -7.5 + (i / 27) * 15 + (rng() - 0.5) * 0.5,
+      y: 1.85 + rng() * 0.55,
+      size: 0.18 + rng() * 0.18,
+      offset: rng() * Math.PI * 2
+    }));
+  }, []);
+
+  // Salpicaduras al frente de la ola
+  const splashDrops = useMemo(() => {
+    const rng = makeRng(999111);
+    return Array.from({ length: 18 }).map(() => ({
+      x: -6 + rng() * 12,
+      yBase: 0.5 + rng() * 0.7,
+      size: 0.06 + rng() * 0.08,
+      phase: rng() * Math.PI * 2
+    }));
+  }, []);
+
+  useFrame((state) => {
+    if (!active) {
+      startTimeRef.current = null;
+      // Resetear posiciones cuando no está activo
+      if (wallRef.current) wallRef.current.position.z = -12;
+      if (floodRef.current) {
+        floodRef.current.position.y = 0;
+        (floodRef.current.material as THREE.MeshStandardMaterial).opacity = 0;
+      }
+      return;
+    }
+    if (startTimeRef.current == null) {
+      startTimeRef.current = state.clock.elapsedTime;
+    }
+    const elapsed = state.clock.elapsedTime - startTimeRef.current;
+    const t = Math.min(elapsed / durationSec, 1.0); // 0 → 1
+
+    // Pared cruza la parcela de Z=-12 a Z=12
+    if (wallRef.current) {
+      wallRef.current.position.z = -12 + t * 24;
+      // ligera oscilación de la cresta
+      wallRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 4) * 0.015;
+    }
+
+    // Inundación: la lámina de agua sube hasta la mitad y baja al final
+    if (floodRef.current) {
+      // Curva pico-y-baja: max en t=0.5
+      const flood = Math.sin(Math.PI * t); // 0 → 1 → 0
+      floodRef.current.position.y = 0.04 + flood * 0.45;
+      const mat = floodRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = 0.35 + flood * 0.55;
+    }
+
+    // Salpicaduras: cada gota se anima individualmente
+    if (splashRef.current) {
+      splashRef.current.position.z = wallRef.current ? wallRef.current.position.z + 0.6 : 0;
+      splashRef.current.children.forEach((child, i) => {
+        const d = splashDrops[i];
+        if (!d) return;
+        const time = state.clock.elapsedTime * 6 + d.phase;
+        const yOff = Math.abs(Math.sin(time)) * 0.5;
+        child.position.y = d.yBase + yOff;
+      });
+    }
+  });
+
+  if (!active) return null;
+
+  return (
+    <group>
+      {/* Lámina de agua que inunda el terreno (sube y baja) */}
+      <mesh ref={floodRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+        <planeGeometry args={[14, 14]} />
+        <meshStandardMaterial
+          color="#0f3b62"
+          transparent
+          opacity={0}
+          roughness={0.15}
+          metalness={0.6}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+
+      {/* Pared de tsunami: agua + cresta + espuma */}
+      <group ref={wallRef} position={[0, 0, -12]}>
+        {/* Cuerpo principal del agua (caja oscura) */}
+        <mesh position={[0, 1, 0]} castShadow>
+          <boxGeometry args={[16, 2.2, 0.9]} />
+          <meshStandardMaterial
+            color="#0a2f4c"
+            roughness={0.22}
+            metalness={0.55}
+            transparent
+            opacity={0.93}
+          />
+        </mesh>
+        {/* Capa intermedia más clara para profundidad */}
+        <mesh position={[0, 0.55, 0.25]}>
+          <boxGeometry args={[16, 1.4, 0.55]} />
+          <meshStandardMaterial
+            color="#155080"
+            roughness={0.18}
+            metalness={0.5}
+            transparent
+            opacity={0.85}
+          />
+        </mesh>
+        {/* Cresta curvada al frente (cilindro acostado) */}
+        <mesh position={[0, 1.9, 0.35]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <cylinderGeometry args={[0.55, 0.55, 16, 18, 1, true]} />
+          <meshStandardMaterial
+            color="#246596"
+            roughness={0.12}
+            metalness={0.6}
+            transparent
+            opacity={0.92}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+        {/* Tapas del cilindro */}
+        <mesh position={[-8, 1.9, 0.35]} rotation={[0, 0, Math.PI / 2]}>
+          <circleGeometry args={[0.55, 18]} />
+          <meshStandardMaterial color="#246596" roughness={0.2} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh position={[8, 1.9, 0.35]} rotation={[0, 0, -Math.PI / 2]}>
+          <circleGeometry args={[0.55, 18]} />
+          <meshStandardMaterial color="#246596" roughness={0.2} side={THREE.DoubleSide} />
+        </mesh>
+        {/* Espuma en la cresta */}
+        {foamPositions.map((f, i) => (
+          <mesh
+            key={i}
+            position={[f.x, f.y, 0.42]}
+            scale={[1, 0.9, 1]}
+            castShadow
+          >
+            <sphereGeometry args={[f.size, 10, 8]} />
+            <meshStandardMaterial
+              color="#f4f9ff"
+              emissive="#ffffff"
+              emissiveIntensity={0.18}
+              roughness={0.45}
+            />
+          </mesh>
+        ))}
+        {/* Salpicaduras delante */}
+        <group ref={splashRef}>
+          {splashDrops.map((d, i) => (
+            <mesh key={i} position={[d.x, d.yBase, 0]}>
+              <sphereGeometry args={[d.size, 6, 5]} />
+              <meshStandardMaterial color="#cfe5fa" transparent opacity={0.8} roughness={0.3} metalness={0.4} />
+            </mesh>
+          ))}
+        </group>
+      </group>
+    </group>
+  );
+};
+
+// ============================================================
+// Helper común: tiempo transcurrido desde que se activa el efecto
+// ============================================================
+
+const useEffectClock = (active: boolean) => {
+  const startRef = useRef<number | null>(null);
+  return (elapsed: number) => {
+    if (!active) { startRef.current = null; return 0; }
+    if (startRef.current == null) startRef.current = elapsed;
+    return elapsed - startRef.current;
+  };
+};
+
+// ============================================================
+// Terremoto — grietas en el suelo + polvo subiendo + shake
+// ============================================================
+
+const Earthquake: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const dustRef = useRef<THREE.Group>(null);
+  const getElapsed = useEffectClock(active);
+
+  const grietas = useMemo(() => {
+    const rng = makeRng(33001);
+    return Array.from({ length: 7 }).map(() => {
+      const angle = rng() * Math.PI;
+      const length = 3 + rng() * 3.5;
+      const cx = (rng() - 0.5) * 6;
+      const cz = (rng() - 0.5) * 6;
+      return { angle, length, cx, cz, segs: 3 + Math.floor(rng() * 3), thickness: 0.04 + rng() * 0.05 };
+    });
+  }, []);
+
+  const polvo = useMemo(() => {
+    const rng = makeRng(33002);
+    return Array.from({ length: 35 }).map(() => ({
+      x: (rng() - 0.5) * 9,
+      z: (rng() - 0.5) * 9,
+      delay: rng() * 0.6,
+      size: 0.07 + rng() * 0.12,
+      maxY: 1 + rng() * 1.5,
+      drift: (rng() - 0.5) * 0.4
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) {
+      if (groupRef.current) { groupRef.current.position.set(0,0,0); groupRef.current.rotation.set(0,0,0); }
+      return;
+    }
+    const p = Math.min(t / durationSec, 1);
+
+    // Shake del grupo entero (más intenso en el primer tercio)
+    if (groupRef.current) {
+      const intensity = p < 0.4 ? 1 - p / 0.4 : 0;
+      const f = state.clock.elapsedTime * 35;
+      groupRef.current.position.x = Math.sin(f) * 0.08 * intensity;
+      groupRef.current.position.z = Math.cos(f * 1.3) * 0.06 * intensity;
+      groupRef.current.rotation.z = Math.sin(f * 0.7) * 0.015 * intensity;
+    }
+    // Polvo subiendo y desvaneciéndose
+    if (dustRef.current) {
+      dustRef.current.children.forEach((c, i) => {
+        const d = polvo[i]; if (!d) return;
+        const localT = Math.max(0, t - d.delay);
+        const phase = (localT * 0.6) % 1;
+        c.position.y = phase * d.maxY;
+        c.position.x = d.x + d.drift * phase;
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = (1 - phase) * 0.7;
+      });
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <group ref={groupRef}>
+      {/* Grietas: cada grieta = varios segmentos en zigzag */}
+      {grietas.map((g, gi) => (
+        <group key={gi} position={[g.cx, 0.05, g.cz]} rotation={[0, g.angle, 0]}>
+          {Array.from({ length: g.segs }).map((_, si) => {
+            const t = si / g.segs;
+            const x = (t - 0.5) * g.length;
+            const zigzag = ((si % 2 === 0) ? 1 : -1) * g.thickness * 1.6;
+            return (
+              <mesh key={si} position={[x, 0.005, zigzag]} rotation={[-Math.PI / 2, 0, 0]}>
+                <planeGeometry args={[g.length / g.segs * 1.1, g.thickness * 2.4]} />
+                <meshStandardMaterial color="#1a0d05" roughness={0.95} side={THREE.DoubleSide} />
+              </mesh>
+            );
+          })}
+        </group>
+      ))}
+      {/* Polvo */}
+      <group ref={dustRef}>
+        {polvo.map((d, i) => (
+          <mesh key={i} position={[d.x, 0, d.z]}>
+            <sphereGeometry args={[d.size, 6, 5]} />
+            <meshStandardMaterial color="#9a7b54" transparent opacity={0} roughness={0.95} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+};
+
+// ============================================================
+// Tornado — vórtice cónico giratorio + escombros orbitando
+// ============================================================
+
+const Tornado: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const vortexRef = useRef<THREE.Group>(null);
+  const debrisRef = useRef<THREE.Group>(null);
+  const getElapsed = useEffectClock(active);
+
+  const debris = useMemo(() => {
+    const rng = makeRng(44001);
+    return Array.from({ length: 22 }).map(() => ({
+      orbitR: 0.5 + rng() * 1.8,
+      yBase: rng() * 4,
+      speed: 1 + rng() * 2,
+      size: 0.07 + rng() * 0.12,
+      phase: rng() * Math.PI * 2
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    const p = Math.min(t / durationSec, 1);
+    // El tornado se mueve de izquierda a derecha durante la duración
+    const xPos = -5 + p * 10;
+    if (vortexRef.current) {
+      vortexRef.current.position.x = xPos;
+      vortexRef.current.rotation.y = state.clock.elapsedTime * 6;
+    }
+    if (debrisRef.current) {
+      debrisRef.current.position.x = xPos;
+      debrisRef.current.children.forEach((c, i) => {
+        const d = debris[i]; if (!d) return;
+        const ang = state.clock.elapsedTime * d.speed + d.phase;
+        c.position.x = Math.cos(ang) * d.orbitR;
+        c.position.z = Math.sin(ang) * d.orbitR;
+        const verticalLoop = (state.clock.elapsedTime * 0.7 + d.phase) % 1;
+        c.position.y = d.yBase + verticalLoop * 0.8;
+      });
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Vórtice: varios conos apilados girando */}
+      <group ref={vortexRef} position={[-5, 0, 0]}>
+        {Array.from({ length: 6 }).map((_, i) => {
+          const y = i * 0.85;
+          const rBot = 0.4 + i * 0.18;
+          const rTop = 0.55 + i * 0.22;
+          return (
+            <mesh key={i} position={[0, y + 0.4, 0]}>
+              <cylinderGeometry args={[rTop, rBot, 0.85, 16, 1, true]} />
+              <meshStandardMaterial
+                color={i < 2 ? '#3a3a3a' : i < 4 ? '#6a6a6a' : '#9a9aa0'}
+                transparent
+                opacity={0.55 + i * 0.04}
+                side={THREE.DoubleSide}
+                roughness={0.9}
+              />
+            </mesh>
+          );
+        })}
+        {/* Punta superior más ancha y difusa */}
+        <mesh position={[0, 5.5, 0]}>
+          <sphereGeometry args={[1.5, 12, 8]} />
+          <meshStandardMaterial color="#aaaab0" transparent opacity={0.35} />
+        </mesh>
+      </group>
+      {/* Escombros */}
+      <group ref={debrisRef} position={[-5, 0, 0]}>
+        {debris.map((d, i) => (
+          <mesh key={i}>
+            <boxGeometry args={[d.size * 1.5, d.size, d.size]} />
+            <meshStandardMaterial color="#5a3a14" roughness={0.85} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  );
+};
+
+// ============================================================
+// Incendio — llamas + humo
+// ============================================================
+
+const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const flameRefs = useRef<THREE.Group[]>([]);
+  const smokeRef = useRef<THREE.Group>(null);
+  const getElapsed = useEffectClock(active);
+
+  const flames = useMemo(() => {
+    const rng = makeRng(55001);
+    return Array.from({ length: 8 }).map(() => ({
+      x: (rng() - 0.5) * 8,
+      z: (rng() - 0.5) * 8,
+      scale: 0.6 + rng() * 0.7,
+      phase: rng() * Math.PI * 2
+    }));
+  }, []);
+
+  const smoke = useMemo(() => {
+    const rng = makeRng(55002);
+    return Array.from({ length: 18 }).map(() => ({
+      x: (rng() - 0.5) * 8,
+      z: (rng() - 0.5) * 8,
+      delay: rng() * 1,
+      size: 0.2 + rng() * 0.3,
+      maxY: 3 + rng() * 2
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    flameRefs.current.forEach((g, i) => {
+      if (!g) return;
+      const f = flames[i];
+      const wobble = Math.sin(state.clock.elapsedTime * 8 + f.phase) * 0.08;
+      g.scale.y = f.scale * (1 + wobble);
+      g.rotation.z = Math.sin(state.clock.elapsedTime * 5 + f.phase) * 0.1;
+    });
+    if (smokeRef.current) {
+      smokeRef.current.children.forEach((c, i) => {
+        const s = smoke[i]; if (!s) return;
+        const localT = Math.max(0, t - s.delay);
+        const phase = (localT * 0.35) % 1;
+        c.position.y = phase * s.maxY;
+        c.scale.setScalar(1 + phase * 1.5);
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = (1 - phase) * 0.55;
+      });
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Llamas: cada una son varios conos apilados (rojo→naranja→amarillo) */}
+      {flames.map((f, i) => (
+        <group key={i} position={[f.x, 0, f.z]} ref={(el) => { if (el) flameRefs.current[i] = el; }} scale={f.scale}>
+          <mesh position={[0, 0.25, 0]} castShadow>
+            <coneGeometry args={[0.3, 0.5, 8]} />
+            <meshStandardMaterial color="#c0260e" emissive="#ff4d1c" emissiveIntensity={0.7} roughness={0.5} />
+          </mesh>
+          <mesh position={[0, 0.55, 0]}>
+            <coneGeometry args={[0.22, 0.5, 8]} />
+            <meshStandardMaterial color="#ff7a1c" emissive="#ff7a1c" emissiveIntensity={0.9} />
+          </mesh>
+          <mesh position={[0, 0.85, 0]}>
+            <coneGeometry args={[0.13, 0.4, 8]} />
+            <meshStandardMaterial color="#ffd34d" emissive="#ffea7a" emissiveIntensity={1.1} />
+          </mesh>
+          {/* Brasas en la base */}
+          <mesh position={[0, 0.02, 0]}>
+            <sphereGeometry args={[0.18, 8, 6]} />
+            <meshStandardMaterial color="#ff5722" emissive="#ff5722" emissiveIntensity={0.8} />
+          </mesh>
+        </group>
+      ))}
+      {/* Luz emisiva general */}
+      <pointLight position={[0, 1.5, 0]} intensity={2} color="#ff7a3d" distance={12} decay={2} />
+      {/* Humo */}
+      <group ref={smokeRef}>
+        {smoke.map((s, i) => (
+          <mesh key={i} position={[s.x, 0, s.z]}>
+            <sphereGeometry args={[s.size, 8, 6]} />
+            <meshStandardMaterial color="#3a3a3a" transparent opacity={0} roughness={1} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  );
+};
+
+// ============================================================
+// Rayo — zigzag desde el cielo + flash de luz
+// ============================================================
+
+const Lightning: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const boltRef = useRef<THREE.Group>(null);
+  const flashRef = useRef<THREE.PointLight>(null);
+  const getElapsed = useEffectClock(active);
+
+  // Zigzag estable de 7 segmentos desde y=8 a y=0
+  const segments = useMemo(() => {
+    const rng = makeRng(66001);
+    const N = 7;
+    const pts: { x: number; y: number; z: number }[] = [];
+    for (let i = 0; i <= N; i++) {
+      pts.push({
+        x: (rng() - 0.5) * 1.5,
+        y: 8 - (i / N) * 8,
+        z: (rng() - 0.5) * 0.6
+      });
+    }
+    return pts;
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    // El rayo cae rapidísimo (primeros 0.2s), luego se queda 0.4s y desaparece
+    const visible = t < 0.6;
+    const flashIntensity = t < 0.15 ? 12 : t < 0.6 ? 12 * (1 - (t - 0.15) / 0.45) : 0;
+
+    if (boltRef.current) {
+      boltRef.current.visible = visible;
+      // Pequeño flicker en la primera fase
+      boltRef.current.scale.x = visible ? (1 + Math.sin(state.clock.elapsedTime * 60) * 0.08) : 0;
+    }
+    if (flashRef.current) {
+      flashRef.current.intensity = flashIntensity;
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Rayo: cilindros entre puntos consecutivos */}
+      <group ref={boltRef}>
+        {segments.slice(0, -1).map((p, i) => {
+          const q = segments[i + 1];
+          const dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z;
+          const length = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2, mz = (p.z + q.z) / 2;
+          // Calcular rotación: el cilindro apunta en Y por defecto
+          const dir = new THREE.Vector3(dx, dy, dz).normalize();
+          const yAxis = new THREE.Vector3(0, 1, 0);
+          const quat = new THREE.Quaternion().setFromUnitVectors(yAxis, dir);
+          const euler = new THREE.Euler().setFromQuaternion(quat);
+          return (
+            <group key={i} position={[mx, my, mz]} rotation={[euler.x, euler.y, euler.z]}>
+              {/* Núcleo blanco */}
+              <mesh>
+                <cylinderGeometry args={[0.04, 0.04, length, 6]} />
+                <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={3} />
+              </mesh>
+              {/* Halo azul-blanco */}
+              <mesh>
+                <cylinderGeometry args={[0.12, 0.12, length, 6]} />
+                <meshStandardMaterial color="#bdd9ff" emissive="#bdd9ff" emissiveIntensity={1.2} transparent opacity={0.45} />
+              </mesh>
+            </group>
+          );
+        })}
+        {/* Impacto en el suelo: brillo radial */}
+        <mesh position={[segments[segments.length - 1].x, 0.01, segments[segments.length - 1].z]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0, 0.7, 24]} />
+          <meshStandardMaterial color="#ffffff" emissive="#fff8a8" emissiveIntensity={2} transparent opacity={0.85} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+      {/* Flash de luz puntual */}
+      <pointLight ref={flashRef} position={[segments[0].x, 7, segments[0].z]} intensity={12} color="#ffffff" distance={30} decay={2} />
+    </>
+  );
+};
+
+// ============================================================
+// Lluvia ácida — tinte verde + nube tóxica + gotas verdes
+// ============================================================
+
+const AcidRain: React.FC<{ active: boolean }> = ({ active }) => {
+  const dropsRef = useRef<THREE.Group>(null);
+  const cloudRef = useRef<THREE.Mesh>(null);
+  const drops = useMemo(() => {
+    const rng = makeRng(77001);
+    return Array.from({ length: 60 }).map(() => ({
+      x: (rng() - 0.5) * 14,
+      z: (rng() - 0.5) * 14,
+      yMax: 5 + rng() * 3,
+      speed: 0.6 + rng() * 0.7,
+      phase: rng(),
+      size: 0.04 + rng() * 0.05
+    }));
+  }, []);
+
+  useFrame((state) => {
+    if (!active) return;
+    if (dropsRef.current) {
+      dropsRef.current.children.forEach((c, i) => {
+        const d = drops[i]; if (!d) return;
+        const phase = ((state.clock.elapsedTime * d.speed + d.phase) % 1);
+        c.position.y = d.yMax - phase * d.yMax;
+      });
+    }
+    if (cloudRef.current) {
+      cloudRef.current.rotation.y = state.clock.elapsedTime * 0.1;
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Nube tóxica baja */}
+      <mesh ref={cloudRef} position={[0, 7, 0]} scale={[8, 1, 8]}>
+        <sphereGeometry args={[1, 16, 10]} />
+        <meshStandardMaterial color="#7faa20" transparent opacity={0.45} emissive="#5a8210" emissiveIntensity={0.1} />
+      </mesh>
+      {/* Pluma de neblina verdosa que cubre la parcela */}
+      <mesh position={[0, 2.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[16, 16]} />
+        <meshStandardMaterial color="#a8c252" transparent opacity={0.12} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Gotas verdosas cayendo */}
+      <group ref={dropsRef}>
+        {drops.map((d, i) => (
+          <mesh key={i} position={[d.x, d.yMax, d.z]} scale={[d.size, d.size * 2.5, d.size]}>
+            <sphereGeometry args={[1, 6, 4]} />
+            <meshStandardMaterial color="#a8d028" emissive="#a8d028" emissiveIntensity={0.4} transparent opacity={0.85} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  );
+};
+
+// ============================================================
+// Nevada — copos 3D + manto blanco acumulándose
+// ============================================================
+
+const Snowfall: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const flakesRef = useRef<THREE.Group>(null);
+  const groundRef = useRef<THREE.Mesh>(null);
+  const getElapsed = useEffectClock(active);
+
+  const flakes = useMemo(() => {
+    const rng = makeRng(88001);
+    return Array.from({ length: 80 }).map(() => ({
+      x: (rng() - 0.5) * 14,
+      z: (rng() - 0.5) * 14,
+      yMax: 6 + rng() * 3,
+      speed: 0.15 + rng() * 0.2,
+      phase: rng(),
+      sway: rng() * Math.PI * 2,
+      size: 0.06 + rng() * 0.08
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    if (flakesRef.current) {
+      flakesRef.current.children.forEach((c, i) => {
+        const f = flakes[i]; if (!f) return;
+        const phase = ((state.clock.elapsedTime * f.speed + f.phase) % 1);
+        c.position.y = f.yMax - phase * f.yMax;
+        c.position.x = f.x + Math.sin(state.clock.elapsedTime + f.sway) * 0.3;
+        c.rotation.z = state.clock.elapsedTime * 0.8;
+      });
+    }
+    // Manto blanco: sube opacity progresivamente, luego se queda
+    if (groundRef.current) {
+      const p = Math.min(t / durationSec, 1);
+      const mat = groundRef.current.material as THREE.MeshStandardMaterial;
+      // Sube hasta 0.7 y se mantiene
+      mat.opacity = Math.min(p * 1.8, 0.75);
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Manto de nieve sobre el terreno */}
+      <mesh ref={groundRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.08, 0]}>
+        <planeGeometry args={[10, 10]} />
+        <meshStandardMaterial color="#f5fbff" transparent opacity={0} roughness={0.9} />
+      </mesh>
+      {/* Copos cayendo */}
+      <group ref={flakesRef}>
+        {flakes.map((f, i) => (
+          <mesh key={i} position={[f.x, f.yMax, f.z]} scale={[f.size, f.size, f.size * 0.3]}>
+            <octahedronGeometry args={[1, 0]} />
+            <meshStandardMaterial color="#ffffff" emissive="#dceaff" emissiveIntensity={0.25} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  );
+};
+
+// ============================================================
+// Niebla densa — bruma volumétrica baja
+// ============================================================
+
+const FogVolume: React.FC<{ active: boolean }> = ({ active }) => {
+  const layersRef = useRef<THREE.Group>(null);
+  const layers = useMemo(() => {
+    const rng = makeRng(99001);
+    return Array.from({ length: 10 }).map((_, i) => ({
+      y: 0.5 + i * 0.4 + rng() * 0.2,
+      driftPhase: rng() * Math.PI * 2,
+      driftSpeed: 0.1 + rng() * 0.15,
+      size: 12 + rng() * 4
+    }));
+  }, []);
+
+  useFrame((state) => {
+    if (!active || !layersRef.current) return;
+    layersRef.current.children.forEach((c, i) => {
+      const l = layers[i]; if (!l) return;
+      c.position.x = Math.sin(state.clock.elapsedTime * l.driftSpeed + l.driftPhase) * 1.5;
+      c.position.z = Math.cos(state.clock.elapsedTime * l.driftSpeed * 0.7 + l.driftPhase) * 1.2;
+    });
+  });
+
+  if (!active) return null;
+  return (
+    <group ref={layersRef}>
+      {layers.map((l, i) => (
+        <mesh key={i} position={[0, l.y, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[l.size, l.size]} />
+          <meshStandardMaterial color="#e8edef" transparent opacity={0.18} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+// ============================================================
+// Lluvia torrencial — cortinas + encharcamiento
+// ============================================================
+
+const HeavyRain: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+  const dropsRef = useRef<THREE.Group>(null);
+  const puddleRef = useRef<THREE.Mesh>(null);
+  const getElapsed = useEffectClock(active);
+
+  const drops = useMemo(() => {
+    const rng = makeRng(11101);
+    return Array.from({ length: 120 }).map(() => ({
+      x: (rng() - 0.5) * 14,
+      z: (rng() - 0.5) * 14,
+      yMax: 6 + rng() * 3,
+      speed: 1.4 + rng() * 0.9,
+      phase: rng(),
+      length: 0.4 + rng() * 0.4
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    if (dropsRef.current) {
+      dropsRef.current.children.forEach((c, i) => {
+        const d = drops[i]; if (!d) return;
+        const phase = ((state.clock.elapsedTime * d.speed + d.phase) % 1);
+        c.position.y = d.yMax - phase * d.yMax;
+      });
+    }
+    // Charco que crece poco a poco
+    if (puddleRef.current) {
+      const p = Math.min(t / durationSec, 1);
+      const mat = puddleRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = p * 0.7;
+      puddleRef.current.scale.setScalar(0.5 + p * 0.5);
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Cielo más oscuro */}
+      <mesh position={[0, 9, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[30, 30]} />
+        <meshBasicMaterial color="#4a5560" transparent opacity={0.4} />
+      </mesh>
+      {/* Gotas alargadas */}
+      <group ref={dropsRef}>
+        {drops.map((d, i) => (
+          <mesh key={i} position={[d.x, d.yMax, d.z]} scale={[0.025, d.length, 0.025]}>
+            <cylinderGeometry args={[1, 1, 1, 4]} />
+            <meshStandardMaterial color="#7fbedf" transparent opacity={0.8} />
+          </mesh>
+        ))}
+      </group>
+      {/* Encharcamiento en el suelo */}
+      <mesh ref={puddleRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.06, 0]} scale={0.5}>
+        <planeGeometry args={[10, 10]} />
+        <meshStandardMaterial color="#2a4a6a" transparent opacity={0} roughness={0.1} metalness={0.7} />
+      </mesh>
+    </>
+  );
+};
+
+// ============================================================
 // Campo (grid de plantas)
 // ============================================================
 
@@ -659,7 +1461,7 @@ const CloudLayer = React.memo(({ nublado }: { nublado: boolean }) => (
 ));
 CloudLayer.displayName = 'CloudLayer';
 
-export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion }) => {
+export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent }) => {
   const sky = skyParams(simulacion.saludActual);
   const nublado = simulacion.saludActual < 50;
 
@@ -695,6 +1497,17 @@ export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion }) => {
         <Terrain humedad={simulacion.humedadSueloActual} tipoSuelo={simulacion.tipoSuelo} size={10} />
         <CropField simulacion={simulacion} />
 
+        {/* Modelos 3D específicos por evento — cada uno se monta solo cuando su VFX está activo */}
+        <TsunamiWave active={vfxEvent === 'inundacion'} durationSec={4} />
+        <Earthquake active={vfxEvent === 'terremoto'} durationSec={4} />
+        <Tornado active={vfxEvent === 'tornado'} durationSec={4} />
+        <Fire active={vfxEvent === 'incendio_proximo'} durationSec={4} />
+        <Lightning active={vfxEvent === 'rayo_caido'} durationSec={4} />
+        <AcidRain active={vfxEvent === 'lluvia_acida'} />
+        <Snowfall active={vfxEvent === 'nevada'} durationSec={4} />
+        <FogVolume active={vfxEvent === 'niebla_persistente'} />
+        <HeavyRain active={vfxEvent === 'lluvia_torrencial'} durationSec={4} />
+
         <ContactShadows position={[0, 0.01, 0]} opacity={0.35} blur={2.5} far={10} resolution={512} />
         {simulacion.saludActual < 25 && <Stars radius={50} depth={20} count={2500} factor={3} fade speed={0.5} />}
 
@@ -719,6 +1532,7 @@ const MemoFarmScene = React.memo(FarmScene, (prev, next) => {
   const a = prev.simulacion;
   const b = next.simulacion;
   return (
+    prev.vfxEvent === next.vfxEvent &&
     a.idSimulacion === b.idSimulacion &&
     a.saludActual === b.saludActual &&
     a.humedadSueloActual === b.humedadSueloActual &&

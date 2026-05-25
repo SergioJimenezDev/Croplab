@@ -1,183 +1,224 @@
+/* ============================================================
+   Auth pages — papel cuadriculado + ilustraciones de cuaderno
+   ============================================================ */
+
 .auth-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #1a5f3f 0%, #2d8659 50%, #4ca876 100%);
-  padding: var(--spacing-lg);
+  padding: 2rem 1.5rem;
   position: relative;
   overflow: hidden;
+  /* el background de cuadrícula viene de body en index.css */
 }
 
-.auth-container::before {
-  content: '';
+/* === Decoraciones de fondo === */
+.auth-deco {
   position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
-  background-size: 50px 50px;
-  animation: moveBackground 20s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.85;
+}
+.auth-deco-magnifier   { top: 7%;   left: 6%;  transform: rotate(-12deg); }
+.auth-deco-drop        { top: 12%;  right: 10%; transform: rotate(14deg); }
+.auth-deco-flask       { bottom: 8%; right: 6%; transform: rotate(8deg); }
+.auth-deco-leaves      { bottom: 9%; left: 7%;  transform: rotate(-6deg); }
+.auth-deco-arrow       { top: 38%;  left: 4%;   transform: rotate(20deg); }
+.auth-deco-arrow-right { top: 36%;  right: 4%;  transform: rotate(-15deg); }
+
+@media (max-width: 900px) {
+  .auth-deco-arrow, .auth-deco-arrow-right { display: none; }
+  .auth-deco-magnifier, .auth-deco-drop, .auth-deco-flask, .auth-deco-leaves { opacity: 0.45; }
+}
+@media (max-width: 600px) {
+  .auth-deco { display: none; }
 }
 
-@keyframes moveBackground {
-  0% { transform: translate(0, 0); }
-  100% { transform: translate(50px, 50px); }
-}
-
+/* === Contenedor principal === */
 .auth-content {
   width: 100%;
-  max-width: 520px;
+  max-width: 460px;
   position: relative;
   z-index: 1;
+  animation: fadeInUp 0.45s ease-out;
 }
 
+/* === Logo === */
 .auth-logo {
   text-align: center;
-  margin-bottom: var(--spacing-xl);
-  color: white;
-  animation: fadeInDown 0.6s ease-out;
+  margin-bottom: 1.8rem;
+}
+
+.auth-logo-emblem {
+  display: inline-flex;
+  margin-bottom: 0.4rem;
+  filter: drop-shadow(3px 3px 0 rgba(28, 36, 33, 0.15));
 }
 
 .auth-logo h1 {
-  font-size: 3.5rem;
-  margin-bottom: var(--spacing-sm);
-  color: white;
+  font-family: var(--font-hand);
+  font-size: 3.6rem;
+  margin: 0;
+  color: var(--paper-ink);
   font-weight: 700;
-  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  letter-spacing: -1px;
+  letter-spacing: 0.01em;
+  transform: rotate(-1deg);
+  display: inline-block;
+  position: relative;
+}
+
+.auth-logo h1::after {
+  content: '';
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 4px;
+  height: 8px;
+  background: linear-gradient(90deg, transparent 0%, var(--paper-accent) 12%, var(--paper-accent) 88%, transparent 100%);
+  opacity: 0.4;
+  border-radius: 4px;
+  z-index: -1;
 }
 
 .auth-logo p {
-  font-size: 1.1rem;
-  opacity: 0.95;
-  font-weight: 300;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 1rem;
+  color: var(--paper-ink-soft);
+  margin: 0.2rem 0 0;
+  font-style: italic;
+  font-family: var(--font-hand);
+  font-size: 1.15rem;
 }
 
+/* === Tarjeta del formulario === */
 .auth-card {
-  animation: fadeInUp 0.6s ease-out;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
-  border-radius: 20px;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.98);
+  background: #ffffff !important;
+  border: 2.5px solid var(--paper-ink) !important;
+  border-radius: 8px !important;
+  box-shadow: 8px 8px 0 rgba(28, 36, 33, 0.92) !important;
+  position: relative;
+  overflow: visible !important;
+  backdrop-filter: none !important;
+}
+
+/* Pegatina "experimento Nº X" en esquina */
+.auth-card::before {
+  content: 'Experimento #1';
+  position: absolute;
+  top: -12px;
+  right: 20px;
+  background: #fdec74;
+  color: var(--paper-ink);
+  font-family: var(--font-hand);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 2px 14px;
+  border: 1.5px solid var(--paper-ink);
+  border-radius: 4px;
+  transform: rotate(3deg);
+  box-shadow: 2px 2px 0 rgba(28, 36, 33, 0.4);
+}
+
+/* "Clip" decorativo arriba a la izquierda */
+.auth-card::after {
+  content: '';
+  position: absolute;
+  top: -14px;
+  left: 24px;
+  width: 28px;
+  height: 22px;
+  background: #c8d6dc;
+  border: 1.5px solid var(--paper-ink);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  box-shadow: inset 0 -2px 0 rgba(28, 36, 33, 0.15);
+}
+
+.auth-card .card-body {
+  padding: 2rem 2rem 1.6rem !important;
 }
 
 .auth-title {
+  font-family: var(--font-hand);
   font-size: 2rem;
-  margin-bottom: var(--spacing-sm);
+  margin: 0 0 0.3rem 0;
   text-align: center;
-  font-weight: 700;
-  color: #1a5f3f;
+  color: var(--paper-ink);
 }
-
 .auth-subtitle {
   text-align: center;
-  color: var(--text-secondary);
-  margin-bottom: var(--spacing-xl);
-  font-size: 0.95rem;
+  color: var(--paper-ink-soft);
+  margin-bottom: 1.4rem;
+  font-size: 0.92rem;
+  font-style: italic;
 }
 
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: 1.15rem;
 }
 
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--spacing-md);
+  gap: 1rem;
 }
 
 .auth-error {
-  background: linear-gradient(135deg, #fee 0%, #fdd 100%);
-  color: #c41e3a;
-  padding: var(--spacing-md);
-  border-radius: 12px;
-  border: 1px solid rgba(220, 53, 69, 0.3);
-  margin-bottom: var(--spacing-md);
-  font-size: var(--font-size-sm);
-  box-shadow: 0 4px 12px rgba(220, 53, 69, 0.1);
-  animation: shake 0.4s ease-in-out;
+  background: #fff0f0;
+  color: #8a1f1f;
+  padding: 0.7rem 0.9rem;
+  border: 1.5px dashed #c62828;
+  border-radius: 4px;
+  margin-bottom: 0.6rem;
+  font-size: 0.88rem;
+  animation: shake 0.35s ease-in-out;
 }
 
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-10px); }
-  75% { transform: translateX(10px); }
+  25% { transform: translateX(-8px); }
+  75% { transform: translateX(8px); }
+}
+
+/* === Botón submit centrado === */
+.auth-submit-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.4rem;
+}
+
+.auth-submit-wrap button {
+  min-width: 220px;
 }
 
 .auth-footer {
-  margin-top: var(--spacing-lg);
+  margin-top: 1.5rem;
   text-align: center;
-  font-size: var(--font-size-sm);
-  color: var(--text-secondary);
-  padding-top: var(--spacing-lg);
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 0.92rem;
+  color: var(--paper-ink-soft);
+  padding-top: 1rem;
+  border-top: 1.5px dashed rgba(28, 36, 33, 0.18);
 }
 
 .auth-link {
-  color: #2d8659;
-  font-weight: 600;
+  color: var(--paper-accent);
+  font-weight: 700;
   text-decoration: none;
-  transition: all 0.3s ease;
-  position: relative;
+  border-bottom: 2px solid var(--paper-accent);
+  padding-bottom: 1px;
+  transition: color 0.15s;
 }
-
-.auth-link:hover {
-  color: #1a5f3f;
-  text-decoration: none;
-}
-
-.auth-link::after {
-  content: '';
-  position: absolute;
-  width: 0;
-  height: 2px;
-  bottom: -2px;
-  left: 0;
-  background-color: #2d8659;
-  transition: width 0.3s ease;
-}
-
-.auth-link:hover::after {
-  width: 100%;
-}
-
-@keyframes fadeInDown {
-  from {
-    opacity: 0;
-    transform: translateY(-30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+.auth-link:hover { color: var(--paper-accent-dark); border-bottom-color: var(--paper-accent-dark); }
 
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 768px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
-  .auth-logo h1 {
-    font-size: 2.5rem;
-  }
-
-  .auth-content {
-    max-width: 100%;
-  }
+@media (max-width: 600px) {
+  .form-row { grid-template-columns: 1fr; }
+  .auth-logo h1 { font-size: 2.6rem; }
+  .auth-logo-emblem svg { width: 90px; height: 90px; }
 }

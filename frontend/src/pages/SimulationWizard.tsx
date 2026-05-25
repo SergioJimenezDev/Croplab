@@ -20,9 +20,11 @@ const SimulationWizard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
 
-  const [formData, setFormData] = useState<Partial<SimulacionFormData>>({
+  const [formData, setFormData] = useState<Partial<SimulacionFormData> & { presupuestoInicial?: number; diasMaximos?: number }>({
     nombreSimulacion: '',
     superficieHectareas: 1,
+    presupuestoInicial: 1000,
+    diasMaximos: 180,
     tipoSuelo: 'franco',
     phSuelo: 6.5,
     materiaOrganica: 2.5,
@@ -107,6 +109,8 @@ const SimulationWizard: React.FC = () => {
     setError('');
 
     try {
+      const presupuesto = formData.presupuestoInicial ?? 1000;
+      const dias = formData.diasMaximos ?? 180;
       const simulacionData = {
         ...formData,
         estado: 'en_curso' as const,
@@ -114,7 +118,10 @@ const SimulationWizard: React.FC = () => {
         etapaFenologica: 'germinacion' as const,
         saludActual: 100,
         alturaActual: 0,
-        humedadSueloActual: 50
+        humedadSueloActual: 50,
+        presupuestoInicial: presupuesto,
+        presupuestoActual: presupuesto,
+        diasMaximos: dias
       };
 
       const nuevaSimulacion = await simulacionService.crear(simulacionData as any);
@@ -169,6 +176,30 @@ const SimulationWizard: React.FC = () => {
         max="10"
         step="0.01"
         helpText="Entre 0.01 y 10 hectáreas"
+        fullWidth
+      />
+
+      <Input
+        label="💰 Presupuesto inicial (€)"
+        type="number"
+        value={formData.presupuestoInicial}
+        onChange={(e) => handleInputChange('presupuestoInicial' as any, parseFloat(e.target.value))}
+        min="100"
+        max="100000"
+        step="50"
+        helpText="Dinero del que dispondrás para riego, fertilización, tratamientos… (por defecto 1000 €)"
+        fullWidth
+      />
+
+      <Input
+        label="📅 Duración máxima de la simulación (días)"
+        type="number"
+        value={formData.diasMaximos}
+        onChange={(e) => handleInputChange('diasMaximos' as any, parseInt(e.target.value, 10))}
+        min="30"
+        max="365"
+        step="1"
+        helpText="Cuántos días puede durar como máximo el ciclo (por defecto 180)"
         fullWidth
       />
     </div>

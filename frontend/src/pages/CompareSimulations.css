@@ -1,93 +1,108 @@
+/* ============================================================
+   CompareSimulations — estilo papel cuadriculado
+   ============================================================ */
+
 .compare-page {
   min-height: 100vh;
-  background: #f5f7fa;
+  /* fondo cuadrícula heredado de body */
 }
 
 .compare-header {
-  background: linear-gradient(135deg, #2d5016 0%, #6fa83d 100%);
-  color: white;
-  padding: 1.5rem 2rem;
+  background: #1c2421;
+  color: #fafaf5;
+  padding: 1.2rem 2rem;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1.2rem;
+  box-shadow: 0 4px 0 rgba(28, 36, 33, 0.15);
 }
 
 .compare-header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-family: var(--font-hand);
+  font-size: 2rem;
+  font-weight: 700;
 }
 
 .compare-content {
   max-width: 1400px;
   margin: 2rem auto;
-  padding: 0 2rem;
+  padding: 0 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.4rem;
 }
 
-/* Selector */
+/* Cards genéricas */
+.compare-content .card {
+  background: #ffffff;
+  border: 2.5px solid var(--paper-ink);
+  border-radius: 6px;
+  box-shadow: 6px 6px 0 rgba(28, 36, 33, 0.92);
+  padding: 1.4rem 1.6rem;
+}
+
 .selector-card h3 {
-  margin: 0 0 1rem;
-  color: #333;
+  margin: 0 0 0.9rem;
+  font-family: var(--font-hand);
+  font-size: 1.5rem;
+  color: var(--paper-ink);
 }
 
 .sim-selector {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .sim-chip {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.6rem 1rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 25px;
-  background: white;
+  padding: 0.5rem 0.9rem;
+  border: 2px solid var(--paper-ink);
+  border-radius: 4px;
+  background: #ffffff;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
   font-size: 0.85rem;
+  box-shadow: 3px 3px 0 var(--paper-ink);
 }
-
 .sim-chip:hover {
-  border-color: #6fa83d;
-  background: #f9fdf4;
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 var(--paper-ink);
 }
 
 .sim-chip.selected {
-  border-color: #2d8659;
   background: #e8f5e9;
-  box-shadow: 0 2px 8px rgba(45, 134, 89, 0.2);
+  box-shadow: 3px 3px 0 var(--paper-accent);
+  border-color: var(--paper-accent);
 }
 
 .chip-cultivo {
   text-transform: capitalize;
-  font-weight: 600;
-  color: #2d5016;
+  font-weight: 700;
+  color: var(--paper-ink);
 }
 
-.chip-nombre {
-  color: #555;
-}
+.chip-nombre { color: var(--paper-ink-soft); }
 
 .chip-estado {
   padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: capitalize;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1.5px solid var(--paper-ink);
 }
 
 .chip-exitoso { background: #d4edda; color: #155724; }
 .chip-fracaso_parcial { background: #fff3cd; color: #856404; }
 .chip-fracaso_total { background: #f8d7da; color: #721c24; }
 
-/* Table */
-.compare-table-wrapper {
-  overflow-x: auto;
-}
+/* === Tabla comparativa === */
+.compare-table-wrapper { overflow-x: auto; }
 
 .compare-table {
   width: 100%;
@@ -97,33 +112,35 @@
 
 .compare-table th,
 .compare-table td {
-  padding: 0.75rem 1rem;
+  padding: 0.7rem 1rem;
   text-align: left;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1.5px dashed rgba(28, 36, 33, 0.2);
 }
 
 .compare-table th {
-  background: #f8f9fa;
-  font-weight: 600;
+  background: #fdfcf6;
+  font-weight: 700;
   white-space: nowrap;
+  color: var(--paper-ink);
+  border-bottom: 2px solid var(--paper-ink);
 }
 
 .compare-table td:first-child {
-  font-weight: 500;
-  color: #555;
+  font-weight: 600;
+  color: var(--paper-ink-soft);
   white-space: nowrap;
 }
 
-.compare-table tbody tr:hover {
-  background: #fafafa;
-}
+.compare-table tbody tr:hover { background: #fcfaf2; }
 
 .badge-result {
   padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-transform: capitalize;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1.5px solid var(--paper-ink);
 }
 
 .badge-exitoso { background: #d4edda; color: #155724; }
@@ -131,33 +148,24 @@
 .badge-fracaso_total { background: #f8d7da; color: #721c24; }
 
 .capitalize { text-transform: capitalize; }
-.text-green { color: #28a745; font-weight: 600; }
-.text-red { color: #dc3545; font-weight: 600; }
+.text-green { color: var(--paper-accent); font-weight: 700; }
+.text-red { color: #c62828; font-weight: 700; }
 
-/* Charts grid */
+/* === Gráficos === */
 .compare-charts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-  gap: 1.5rem;
+  gap: 1.4rem;
 }
 
 .text-center {
   text-align: center;
-  color: #888;
+  color: var(--paper-ink-soft);
 }
 
 @media (max-width: 768px) {
-  .compare-charts {
-    grid-template-columns: 1fr;
-  }
-
-  .compare-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-  }
-
-  .sim-selector {
-    flex-direction: column;
-  }
+  .compare-charts { grid-template-columns: 1fr; }
+  .compare-header { flex-direction: column; align-items: flex-start; gap: 0.6rem; padding: 1rem; }
+  .sim-selector { flex-direction: column; }
+  .compare-content { padding: 0 1rem; }
 }

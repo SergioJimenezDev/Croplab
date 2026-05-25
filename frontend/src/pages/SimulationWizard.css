@@ -1,7 +1,11 @@
+/* ============================================================
+   SimulationWizard — estilo papel cuadriculado
+   ============================================================ */
+
 .simulation-wizard {
-  max-width: 900px;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 2rem 1.5rem;
   min-height: 100vh;
 }
 
@@ -10,17 +14,25 @@
 }
 
 .wizard-header h1 {
-  color: #2d5016;
-  margin-bottom: 1.5rem;
+  font-family: var(--font-hand);
+  font-size: 2.6rem;
+  color: var(--paper-ink);
+  margin: 0 0 1.5rem 0;
   text-align: center;
+  transform: rotate(-0.5deg);
 }
 
-/* Step Indicator */
+/* === Step Indicator === */
 .step-indicator {
   display: flex;
   justify-content: space-between;
   margin-bottom: 2rem;
-  padding: 0 1rem;
+  padding: 0 0.5rem;
+  background: #ffffff;
+  border: 2px solid var(--paper-ink);
+  border-radius: 6px;
+  box-shadow: 4px 4px 0 var(--paper-ink);
+  padding: 1.1rem 1rem;
 }
 
 .step {
@@ -34,274 +46,251 @@
 .step:not(:last-child)::after {
   content: '';
   position: absolute;
-  top: 20px;
+  top: 18px;
   left: 50%;
   width: 100%;
-  height: 2px;
-  background-color: #e0e0e0;
-  z-index: -1;
+  height: 0;
+  border-top: 2px dashed rgba(28, 36, 33, 0.3);
+  z-index: 0;
 }
 
 .step.completed:not(:last-child)::after {
-  background-color: #4caf50;
+  border-top-color: var(--paper-accent);
+  border-top-style: solid;
 }
 
 .step-number {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background-color: #e0e0e0;
-  color: #666;
+  background: #ffffff;
+  border: 2.5px solid var(--paper-ink);
+  color: var(--paper-ink);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  margin-bottom: 0.5rem;
-  transition: all 0.3s ease;
+  margin-bottom: 0.4rem;
+  position: relative;
+  z-index: 1;
+  transition: all 0.15s ease;
 }
 
 .step.active .step-number {
-  background-color: #6fa83d;
-  color: white;
+  background: var(--paper-accent);
+  color: #ffffff;
   transform: scale(1.1);
+  box-shadow: 3px 3px 0 var(--paper-ink);
 }
 
 .step.completed .step-number {
-  background-color: #4caf50;
-  color: white;
+  background: var(--paper-ink);
+  color: #ffffff;
 }
 
 .step-label {
-  font-size: 0.85rem;
-  color: #666;
+  font-size: 0.82rem;
+  color: var(--paper-ink-soft);
   text-align: center;
+  font-family: var(--font-hand);
+  font-weight: 600;
+  font-size: 1rem;
 }
 
 .step.active .step-label {
-  color: #2d5016;
-  font-weight: 600;
+  color: var(--paper-ink);
 }
 
-/* Wizard Content */
+/* === Wizard Content === */
 .wizard-content {
-  background: white;
-  border-radius: 12px;
-  padding: 2.5rem;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  border: 2.5px solid var(--paper-ink);
+  border-radius: 6px;
+  padding: 2.2rem;
+  box-shadow: 6px 6px 0 var(--paper-ink);
   min-height: 500px;
+  position: relative;
+}
+.wizard-content::before {
+  content: '';
+  position: absolute;
+  left: 40px;
+  top: 1.5rem;
+  bottom: 1.5rem;
+  width: 1.5px;
+  background: var(--paper-margin);
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .wizard-step {
   animation: fadeIn 0.3s ease;
+  padding-left: 28px;
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .wizard-step h2 {
-  color: #2d5016;
-  margin-bottom: 0.5rem;
-  font-size: 1.75rem;
+  font-family: var(--font-hand);
+  color: var(--paper-ink);
+  margin: 0 0 0.4rem 0;
+  font-size: 2rem;
+  letter-spacing: 0.01em;
 }
 
 .step-description {
-  color: #666;
-  margin-bottom: 2rem;
-  font-size: 1rem;
+  color: var(--paper-ink-soft);
+  margin-bottom: 1.8rem;
+  font-size: 0.95rem;
+  font-style: italic;
 }
 
-/* Form Elements */
+/* === Form === */
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.3rem;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 0.5rem;
-  color: #333;
-  font-weight: 500;
-  font-size: 0.95rem;
+  margin-bottom: 0.4rem;
+  color: var(--paper-ink);
+  font-weight: 600;
+  font-size: 0.92rem;
 }
 
 .select-input {
   width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 1rem;
-  background-color: white;
-  color: #333;
-  transition: border-color 0.2s;
+  padding: 0.65rem 0.8rem;
+  border: 2px solid var(--paper-ink);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background-color: #ffffff;
+  color: var(--paper-ink);
+  font-family: var(--font-sans);
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23333' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231c2421' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 1rem center;
   padding-right: 2.5rem;
+  transition: box-shadow 0.15s ease;
 }
-
 .select-input:focus {
   outline: none;
-  border-color: #6fa83d;
-  box-shadow: 0 0 0 3px rgba(111, 168, 61, 0.1);
+  box-shadow: 3px 3px 0 var(--paper-accent);
 }
 
-.select-input option {
-  padding: 0.5rem;
-}
-
-/* Nutrient Inputs */
-.nutrient-inputs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-top: 1rem;
-}
-
-/* Cultivo Info Card */
+/* === Cultivo info === */
 .cultivo-info {
   margin: 1.5rem 0;
-  padding: 1.5rem;
-  background: #f9fdf4;
-  border-left: 4px solid #6fa83d;
+  padding: 1.2rem 1.4rem;
+  background: #f8fbf5;
+  border: 2px solid var(--paper-ink);
+  border-left: 6px solid var(--paper-accent);
+  border-radius: 4px;
 }
 
 .cultivo-info h3 {
-  color: #2d5016;
-  margin-bottom: 0.5rem;
+  font-family: var(--font-hand);
+  color: var(--paper-ink);
+  margin: 0 0 0.4rem 0;
+  font-size: 1.5rem;
 }
 
 .cultivo-info p {
-  margin: 0.5rem 0;
-  color: #555;
+  margin: 0.4rem 0;
+  color: var(--paper-ink-soft);
 }
 
 .cultivo-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
   margin-top: 1rem;
 }
 
 .stat {
-  padding: 0.75rem;
-  background: white;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  padding: 0.6rem 0.75rem;
+  background: #ffffff;
+  border: 1.5px solid var(--paper-ink);
+  border-radius: 4px;
+  font-size: 0.88rem;
 }
 
 .stat strong {
-  color: #2d5016;
+  color: var(--paper-ink);
   display: block;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-/* Review Section */
+/* === Review === */
 .review-section {
   display: grid;
-  gap: 1.5rem;
+  gap: 0.6rem;
 }
 
 .review-item {
   display: flex;
   justify-content: space-between;
-  padding: 0.75rem 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1.5px dashed rgba(28, 36, 33, 0.2);
 }
 
-.review-item:last-child {
-  border-bottom: none;
-}
+.review-item:last-child { border-bottom: none; }
 
 .review-item .label {
   font-weight: 500;
-  color: #666;
+  color: var(--paper-ink-soft);
 }
 
 .review-item .value {
-  color: #333;
-  font-weight: 600;
+  color: var(--paper-ink);
+  font-weight: 700;
   text-transform: capitalize;
 }
 
-/* Error Message */
+/* === Error === */
 .error-message {
-  background-color: #fee;
-  border: 1px solid #fcc;
-  border-radius: 8px;
-  color: #c33;
-  padding: 1rem;
-  margin-top: 1.5rem;
+  background-color: #fff0f0;
+  border: 1.8px dashed #c62828;
+  border-radius: 4px;
+  color: #8a1f1f;
+  padding: 0.85rem 1rem;
+  margin-top: 1.2rem;
   text-align: center;
+  font-size: 0.92rem;
 }
 
-/* Wizard Footer */
+/* === Footer === */
 .wizard-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-top: 2rem;
-  padding-top: 1.5rem;
+  padding-top: 1.4rem;
+  border-top: 2px dashed rgba(28, 36, 33, 0.2);
 }
 
-.footer-actions {
-  display: flex;
-  gap: 1rem;
-}
+.footer-actions { display: flex; gap: 0.8rem; }
 
-/* Responsive */
 @media (max-width: 768px) {
-  .simulation-wizard {
-    padding: 1rem;
-  }
-
-  .wizard-content {
-    padding: 1.5rem;
-  }
-
-  .step-indicator {
-    padding: 0;
-  }
-
-  .step-label {
-    font-size: 0.7rem;
-  }
-
-  .step-number {
-    width: 35px;
-    height: 35px;
-    font-size: 0.9rem;
-  }
-
-  .nutrient-inputs,
-  .cultivo-stats {
-    grid-template-columns: 1fr;
-  }
-
-  .wizard-footer {
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .footer-actions {
-    width: 100%;
-    justify-content: center;
-  }
+  .simulation-wizard { padding: 1rem; }
+  .wizard-content { padding: 1.4rem; }
+  .wizard-step { padding-left: 8px; }
+  .wizard-content::before { left: 18px; }
+  .step-label { font-size: 0.8rem; }
+  .step-number { width: 32px; height: 32px; font-size: 0.85rem; }
+  .nutrient-inputs, .cultivo-stats { grid-template-columns: 1fr; }
+  .wizard-footer { flex-direction: column; gap: 0.85rem; }
+  .footer-actions { width: 100%; justify-content: center; }
 }
 
 @media (max-width: 480px) {
-  .step-label {
-    display: none;
-  }
-
-  .wizard-step h2 {
-    font-size: 1.5rem;
-  }
+  .step-label { display: none; }
+  .wizard-step h2 { font-size: 1.6rem; }
 }

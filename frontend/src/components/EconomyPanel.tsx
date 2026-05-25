@@ -8,17 +8,20 @@ import './EconomyPanel.css';
 interface EconomyPanelProps {
   simulacionId: number;
   presupuestoActual?: number;
+  /** Cambia cada vez que avanza el día para forzar refresco de los datos económicos. */
+  refreshKey?: number;
 }
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
-export const EconomyPanel: React.FC<EconomyPanelProps> = ({ simulacionId, presupuestoActual }) => {
+export const EconomyPanel: React.FC<EconomyPanelProps> = ({ simulacionId, presupuestoActual, refreshKey }) => {
   const [estadisticas, setEstadisticas] = useState<EstadisticasEconomicas | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadEconomyData();
-  }, [simulacionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulacionId, refreshKey]);
 
   const loadEconomyData = async () => {
     try {

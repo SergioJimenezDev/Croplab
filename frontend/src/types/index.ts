@@ -130,6 +130,7 @@ export interface Simulacion {
   // Configuración de gameplay
   eventosAleatorios?: boolean;
   modoInvencible?: boolean;
+  diasMaximos?: number;
 }
 
 export interface EstadoDiario {

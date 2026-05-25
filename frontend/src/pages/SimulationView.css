@@ -612,28 +612,41 @@
   max-width: 880px;
   width: 100%;
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-  animation: slideUp 0.3s ease;
+  animation: slideUp 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
+
+.modal-overlay.closing { animation: fadeOut 0.28s ease forwards; }
+.modal-content.closing { animation: slideDown 0.28s cubic-bezier(0.55, 0, 0.78, 0.2) forwards; }
 
 @keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(30px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slideDown {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(40px) scale(0.97); }
+}
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
 }
 
+/* Header del modal: pegado arriba */
 .modal-header {
-  padding: 1.5rem 2rem;
+  padding: 1.25rem 2rem;
   border-bottom: 1px solid #e0e0e0;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  background: white;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
 }
 
 .modal-header h2 {
@@ -663,7 +676,9 @@
 }
 
 .modal-body {
-  padding: 2rem;
+  padding: 1.5rem 2rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
 }
 
 .form-group {
@@ -720,8 +735,14 @@
 }
 
 .modal-footer {
-  padding: 1.5rem 2rem;
+  padding: 1.1rem 2rem;
   border-top: 1px solid #e0e0e0;
+  background: white;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.04);
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
@@ -1216,28 +1237,125 @@
 
 /* Side panel */
 .sim-v2-side {
-  position: absolute;
+  position: fixed;
   top: 0; right: 0; bottom: 0;
-  z-index: 8;
-  display: flex;
-  flex-direction: row-reverse;
-  transition: transform 0.3s ease;
-  pointer-events: none;
-}
-.sim-v2-side.open .sim-v2-side-content { transform: translateX(0); pointer-events: auto; }
-.sim-v2-side:not(.open) .sim-v2-side-content { transform: translateX(110%); pointer-events: none; }
-
-.sim-v2-side-content {
   width: 380px;
   max-width: 92vw;
-  background: rgba(15,25,35,0.92);
+  z-index: 8;
+  pointer-events: none;
+  /* Cuando NO está abierto se desplaza fuera del viewport (con un margen extra
+     para que no se quede un filo visible por el border / box-shadow) */
+  transform: translateX(calc(100% + 10px));
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), width 0.32s ease;
+}
+.sim-v2-side.open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.sim-v2-side.fullscreen {
+  width: 100vw;
+  max-width: 100vw;
+}
+
+.sim-v2-side-content {
+  width: 100%;
+  height: 100%;
+  background: rgba(15,25,35,0.95);
   backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(255,255,255,0.15);
+  border-left: 1px solid rgba(255,255,255,0.12);
   padding: 1.2rem 1rem 5rem;
   overflow-y: auto;
-  transition: transform 0.3s ease;
   pointer-events: auto;
   color: #f5f7fa;
+  box-sizing: border-box;
+}
+
+/* Cuando el panel está fullscreen, ocultamos el resto de la UI del simulador */
+.sim-v2-fullscreen-active .sim-v2-header,
+.sim-v2-fullscreen-active .sim-v2-stats,
+.sim-v2-fullscreen-active .sim-v2-dock,
+.sim-v2-fullscreen-active .sim-v2-settings-dock,
+.sim-v2-fullscreen-active .sim-v2-scene {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* === Botón toggle del panel (siempre fijo al viewport) === */
+.sim-v2-panel-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 0;
+  z-index: 11;
+  width: 36px; height: 36px;
+  background: rgba(20,30,40,0.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1.3rem;
+  transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s;
+}
+.sim-v2-panel-toggle:hover { background: rgba(45,65,85,0.9); }
+.sim-v2-panel-toggle.open { right: 380px; }
+.sim-v2-panel-toggle.open.fullscreen { display: none; }
+@media (max-width: 600px) {
+  .sim-v2-panel-toggle.open { right: 92vw; }
+}
+
+/* === Botón pantalla completa / salir === */
+.sim-v2-panel-fullscreen {
+  position: fixed;
+  top: 1rem;
+  right: 44px;
+  z-index: 12;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 0.8rem;
+  background: rgba(20,30,40,0.78);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 10px 0 0 10px;
+  color: #fff;
+  cursor: pointer;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s, transform 0.18s;
+}
+.sim-v2-panel-fullscreen:not(.exit) { right: calc(380px + 8px); }
+.sim-v2-panel-fullscreen:hover { background: rgba(45,65,85,0.9); }
+@media (max-width: 600px) {
+  .sim-v2-panel-fullscreen:not(.exit) { right: calc(92vw + 8px); }
+}
+
+/* En modo fullscreen → botón rojo grande, prominente, arriba derecha */
+.sim-v2-panel-fullscreen.exit {
+  right: 1rem;
+  top: 1rem;
+  height: 48px;
+  padding: 0 1.2rem;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #e53935, #b71c1c);
+  border: 2px solid rgba(255,255,255,0.4);
+  box-shadow: 0 6px 20px rgba(229,57,53,0.5);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  z-index: 13;
+}
+.sim-v2-panel-fullscreen.exit:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(229,57,53,0.6);
+  background: linear-gradient(135deg, #f44336, #c62828);
+}
+.sim-v2-panel-fullscreen.exit span:first-child {
+  font-size: 1.1rem;
+  font-weight: 800;
 }
 .sim-v2-side-content,
 .sim-v2-side-content * {
@@ -1430,11 +1548,20 @@
 .sim-v2-side-content .info-row .value { font-weight: 600; text-transform: capitalize; }
 
 .sim-v2-side-tabs {
+  position: fixed;
+  top: 5rem;
+  right: 0;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  padding: 6rem 0.4rem 0;
+  padding: 0.4rem 0 0.4rem 0.4rem;
   pointer-events: auto;
+  transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sim-v2-side-tabs.open { right: 380px; }
+@media (max-width: 600px) {
+  .sim-v2-side-tabs.open { right: 92vw; }
 }
 .sim-v2-side-tab {
   width: 44px; height: 44px;
@@ -1451,20 +1578,8 @@
 .sim-v2-side-tab:hover { background: rgba(40,60,80,0.7); }
 .sim-v2-side-tab.active { background: rgba(95,174,69,0.55); border-color: rgba(95,174,69,0.7); }
 
-.sim-v2-side-toggle {
-  position: absolute;
-  top: 1rem;
-  left: -36px;
-  width: 36px; height: 36px;
-  background: rgba(20,30,40,0.7);
-  border: 1px solid rgba(255,255,255,0.18);
-  border-right: none;
-  border-radius: 10px 0 0 10px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 1.3rem;
-  pointer-events: auto;
-}
+/* Legacy: estilos viejos sustituidos por .sim-v2-panel-toggle y .sim-v2-panel-fullscreen */
+.sim-v2-side.fullscreen .sim-v2-side-tabs { display: none; }
 
 /* Dock flotante */
 .sim-v2-dock {
