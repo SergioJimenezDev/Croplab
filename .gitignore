@@ -1,0 +1,61 @@
+# ===== Java / Maven =====
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDEs
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+.idea
+*.iws
+*.iml
+*.ipr
+.vscode/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# ===== Node / Vite / React =====
+node_modules/
+build/
+dist/
+*.local
+
+# Vite / build artifacts
+.vite/
+vite.config.*.timestamp-*
+*.tsbuildinfo
+
+# ===== Env files (NO subir credenciales) =====
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.production
+
+# ===== Logs / Runtime =====
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev.log
+dev.err.log
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Claude / agent metadata =====
+.claude/

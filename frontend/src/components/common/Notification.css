@@ -1,0 +1,114 @@
+.notification-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: var(--z-notification);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  max-width: 400px;
+}
+
+.notification {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--bg-primary);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-lg);
+  border-left: 4px solid;
+}
+
+.notification-success {
+  border-left-color: var(--color-success);
+}
+
+.notification-error {
+  border-left-color: var(--color-error);
+}
+
+.notification-warning {
+  border-left-color: var(--color-warning);
+}
+
+.notification-info {
+  border-left-color: var(--color-info);
+}
+
+.notification-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: var(--font-size-sm);
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.notification-success .notification-icon {
+  background: var(--color-success);
+  color: white;
+}
+
+.notification-error .notification-icon {
+  background: var(--color-error);
+  color: white;
+}
+
+.notification-warning .notification-icon {
+  background: var(--color-warning);
+  color: var(--color-gray-900);
+}
+
+.notification-info .notification-icon {
+  background: var(--color-info);
+  color: white;
+}
+
+.notification-content {
+  flex: 1;
+}
+
+.notification-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.notification-message {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.notification-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--color-gray-500);
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition-base);
+}
+
+.notification-close:hover {
+  color: var(--color-gray-700);
+}
+
+@media (max-width: 768px) {
+  .notification-container {
+    left: 20px;
+    right: 20px;
+    max-width: none;
+  }
+}

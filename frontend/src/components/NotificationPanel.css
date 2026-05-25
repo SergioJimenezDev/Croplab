@@ -1,0 +1,174 @@
+.notification-panel {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  border: 1px solid #e0e0e0;
+}
+
+.notification-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: #f8f9fa;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.notification-panel-header:hover {
+  background: #f0f1f3;
+}
+
+.notification-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.notification-panel-title h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.bell-icon {
+  font-size: 1.1rem;
+}
+
+.alert-badges {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.alert-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: white;
+}
+
+.alert-count-error {
+  background: #dc3545;
+}
+
+.alert-count-warning {
+  background: #ffc107;
+  color: #333;
+}
+
+.collapse-btn {
+  background: none;
+  border: none;
+  font-size: 0.8rem;
+  color: #999;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+/* Alert items */
+.notification-panel-body {
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.alert-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1.25rem;
+  border-bottom: 1px solid #f0f0f0;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.alert-item:last-child {
+  border-bottom: none;
+}
+
+.alert-item:hover {
+  background: #fafafa;
+}
+
+.alert-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.alert-titulo {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 2px;
+}
+
+.alert-mensaje {
+  font-size: 0.82rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+/* Color indicator bar */
+.alert-indicator {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  flex-shrink: 0;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+}
+
+.indicator-success {
+  background: #28a745;
+}
+
+.indicator-warning {
+  background: #ffc107;
+}
+
+.indicator-error {
+  background: #dc3545;
+}
+
+/* Color coding on titles */
+.alert-success .alert-titulo {
+  color: #1e7e34;
+}
+
+.alert-warning .alert-titulo {
+  color: #856404;
+}
+
+.alert-error .alert-titulo {
+  color: #c82333;
+}
+
+/* Scrollbar */
+.notification-panel-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.notification-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notification-panel-body::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}

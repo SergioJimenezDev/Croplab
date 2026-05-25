@@ -1,0 +1,22 @@
+# Configuración de despliegue en Netlify.
+#
+# En el panel de Netlify, al conectar el repo:
+#   Base directory:    croplab/frontend
+#   Build command:     npm run build
+#   Publish directory: croplab/frontend/build
+#
+# Este netlify.toml está aquí dentro de frontend/ por si lo quieres usar
+# como "Base directory = croplab/frontend": Netlify lo detectará automáticamente.
+
+[build]
+  command = "npm run build"
+  publish = "build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Rewrites para que React Router funcione (cualquier ruta interna sirva el index.html)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

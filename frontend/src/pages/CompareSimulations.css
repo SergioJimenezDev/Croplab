@@ -1,0 +1,163 @@
+.compare-page {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.compare-header {
+  background: linear-gradient(135deg, #2d5016 0%, #6fa83d 100%);
+  color: white;
+  padding: 1.5rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.compare-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.compare-content {
+  max-width: 1400px;
+  margin: 2rem auto;
+  padding: 0 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Selector */
+.selector-card h3 {
+  margin: 0 0 1rem;
+  color: #333;
+}
+
+.sim-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.sim-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 25px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 0.85rem;
+}
+
+.sim-chip:hover {
+  border-color: #6fa83d;
+  background: #f9fdf4;
+}
+
+.sim-chip.selected {
+  border-color: #2d8659;
+  background: #e8f5e9;
+  box-shadow: 0 2px 8px rgba(45, 134, 89, 0.2);
+}
+
+.chip-cultivo {
+  text-transform: capitalize;
+  font-weight: 600;
+  color: #2d5016;
+}
+
+.chip-nombre {
+  color: #555;
+}
+
+.chip-estado {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.chip-exitoso { background: #d4edda; color: #155724; }
+.chip-fracaso_parcial { background: #fff3cd; color: #856404; }
+.chip-fracaso_total { background: #f8d7da; color: #721c24; }
+
+/* Table */
+.compare-table-wrapper {
+  overflow-x: auto;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.compare-table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compare-table td:first-child {
+  font-weight: 500;
+  color: #555;
+  white-space: nowrap;
+}
+
+.compare-table tbody tr:hover {
+  background: #fafafa;
+}
+
+.badge-result {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.badge-exitoso { background: #d4edda; color: #155724; }
+.badge-fracaso_parcial { background: #fff3cd; color: #856404; }
+.badge-fracaso_total { background: #f8d7da; color: #721c24; }
+
+.capitalize { text-transform: capitalize; }
+.text-green { color: #28a745; font-weight: 600; }
+.text-red { color: #dc3545; font-weight: 600; }
+
+/* Charts grid */
+.compare-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 1.5rem;
+}
+
+.text-center {
+  text-align: center;
+  color: #888;
+}
+
+@media (max-width: 768px) {
+  .compare-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .compare-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .sim-selector {
+    flex-direction: column;
+  }
+}

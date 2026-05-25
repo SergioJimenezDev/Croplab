@@ -1,0 +1,525 @@
+-- ============================================================================
+-- Script de Creación de Base de Datos - AgriSim
+-- Plataforma Educativa de Simulación Agrícola
+-- ============================================================================
+
+-- Crear la base de datos
+DROP DATABASE IF EXISTS agrisim_db;
+CREATE DATABASE agrisim_db
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
+
+USE agrisim_db;
+
+-- ============================================================================
+-- TABLA: usuario
+-- Almacena la información de los usuarios registrados
+-- ============================================================================
+CREATE TABLE usuario (
+    id_usuario BIGINT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
+    contrasena VARCHAR(255) NOT NULL COMMENT 'Hash de la contraseña',
+    fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fecha_ultimo_acceso TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    rol ENUM('estudiante', 'profesor', 'investigador', 'agricultor') DEFAULT 'estudiante',
+    institucion VARCHAR(200) DEFAULT NULL,
+    
+    INDEX idx_email (email),
+    INDEX idx_fecha_registro (fecha_registro)
+) ENGINE=InnoDB COMMENT='Usuarios del sistema';
+
+-- ============================================================================
+-- TABLA: simulacion
+-- Almacena todas las configuraciones y estado actual de cada simulación
+-- ============================================================================
+CREATE TABLE simulacion (
+    id_simulacion BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_usuario BIGINT NOT NULL,
+    
+    -- Información básica
+    nombre_simulacion VARCHAR(200) NOT NULL,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    estado ENUM('en_curso', 'completada', 'fallida', 'pausada') DEFAULT 'en_curso',
+    dia_actual INT DEFAULT 1 COMMENT 'Día actual de la simulación',
+    
+    -- Configuración del terreno
+    superficie_hectareas DECIMAL(6,2) NOT NULL COMMENT 'Área del campo en hectáreas',
+    tipo_suelo ENUM('arenoso', 'franco_arenoso', 'franco', 'franco_arcilloso', 'arcilloso') NOT NULL,
+    ph_suelo DECIMAL(3,1) NOT NULL COMMENT 'pH del suelo (4.5-8.5)',
+    materia_organica DECIMAL(4,2) DEFAULT NULL COMMENT 'Porcentaje de materia orgánica',
+    drenaje ENUM('malo', 'regular', 'bueno', 'excelente') DEFAULT 'bueno',
+    capacidad_retencion_agua ENUM('baja', 'media', 'alta') DEFAULT 'media',
+    
+    -- Nutrientes iniciales (kg/ha)
+    nitrogeno_inicial DECIMAL(6,2) NOT NULL DEFAULT 0,
+    fosforo_inicial DECIMAL(6,2) NOT NULL DEFAULT 0,
+    potasio_inicial DECIMAL(6,2) NOT NULL DEFAULT 0,
+    
+    -- Configuración climática
+    region_climatica ENUM('mediterraneo', 'continental', 'atlantico', 'subtropical') NOT NULL,
+    temperatura_media DECIMAL(4,2) NOT NULL COMMENT 'Temperatura media en °C',
+    precipitacion_anual DECIMAL(7,2) NOT NULL COMMENT 'Precipitación anual en mm',
+    
+    -- Cultivo seleccionado
+    tipo_cultivo ENUM(
+        'trigo', 'maiz', 'arroz', 'cebada',
+        'tomate', 'lechuga', 'pimiento', 'zanahoria',
+        'judia', 'guisante', 'soja',
+        'girasol', 'colza', 'vid', 'olivo'
+    ) NOT NULL,
+    fecha_siembra DATE NOT NULL,
+    densidad_siembra DECIMAL(6,2) NOT NULL COMMENT 'Plantas/m² o kg/ha',
+    sistema_riego ENUM('ninguno', 'goteo', 'aspersion', 'inundacion') DEFAULT 'goteo',
+    
+    -- Estado actual del cultivo
+    etapa_fenologica ENUM(
+        'germinacion',
+        'emergencia',
+        'vegetativo',
+        'floracion',
+        'fructificacion',
+        'maduracion',
+        'cosecha'
+    ) DEFAULT 'germinacion',
+    salud_actual DECIMAL(5,2) DEFAULT 100.0 COMMENT 'Salud de la planta en % (0-100)',
+    altura_actual DECIMAL(6,2) DEFAULT 0.0 COMMENT 'Altura de la planta en cm',
+    humedad_suelo_actual DECIMAL(5,2) DEFAULT 50.0 COMMENT 'Humedad del suelo en %',
+
+    -- Configuración de gameplay
+    eventos_aleatorios BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Si el sistema genera eventos negativos aleatorios',
+    modo_invencible BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'Si la salud no puede bajar de 100',
+
+    -- Claves foráneas y restricciones
+    FOREIGN KEY (id_usuario) REFERENCES usuario(id_usuario) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_usuario (id_usuario),
+    INDEX idx_estado (estado),
+    INDEX idx_fecha_creacion (fecha_creacion),
+    INDEX idx_tipo_cultivo (tipo_cultivo),
+    
+    -- Restricciones de validación
+    CHECK (dia_actual >= 1),
+    CHECK (superficie_hectareas > 0 AND superficie_hectareas <= 10),
+    CHECK (ph_suelo >= 4.5 AND ph_suelo <= 8.5),
+    CHECK (salud_actual >= 0 AND salud_actual <= 100),
+    CHECK (humedad_suelo_actual >= 0 AND humedad_suelo_actual <= 100)
+) ENGINE=InnoDB COMMENT='Simulaciones de cultivos';
+
+-- ============================================================================
+-- TABLA: estado_diario
+-- Almacena el historial día a día del estado del cultivo
+-- ============================================================================
+CREATE TABLE estado_diario (
+    id_estado BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_simulacion BIGINT NOT NULL,
+    
+    -- Información temporal
+    dia INT NOT NULL COMMENT 'Día de la simulación',
+    fecha_simulada DATE NOT NULL,
+    
+    -- Estado de la planta
+    salud_planta DECIMAL(5,2) NOT NULL COMMENT 'Salud en % (0-100)',
+    altura_cm DECIMAL(6,2) NOT NULL COMMENT 'Altura en centímetros',
+    biomasa_kg_ha DECIMAL(8,2) DEFAULT NULL COMMENT 'Biomasa aérea en kg/ha',
+    indice_area_foliar DECIMAL(4,2) DEFAULT NULL COMMENT 'LAI - Leaf Area Index',
+    etapa_fenologica ENUM(
+        'germinacion',
+        'emergencia',
+        'vegetativo',
+        'floracion',
+        'fructificacion',
+        'maduracion',
+        'cosecha'
+    ) NOT NULL,
+    
+    -- Condiciones ambientales
+    humedad_suelo DECIMAL(5,2) NOT NULL COMMENT 'Humedad del suelo en %',
+    temperatura DECIMAL(4,2) NOT NULL COMMENT 'Temperatura en °C',
+    precipitacion_mm DECIMAL(6,2) DEFAULT 0.0 COMMENT 'Precipitación del día en mm',
+    radiacion_solar DECIMAL(5,2) DEFAULT NULL COMMENT 'Radiación solar en MJ/m²',
+    
+    -- Nutrientes disponibles
+    nitrogeno_disponible DECIMAL(6,2) DEFAULT NULL COMMENT 'N disponible en kg/ha',
+    fosforo_disponible DECIMAL(6,2) DEFAULT NULL COMMENT 'P disponible en kg/ha',
+    potasio_disponible DECIMAL(6,2) DEFAULT NULL COMMENT 'K disponible en kg/ha',
+    
+    -- Indicadores de estrés
+    estres_hidrico BOOLEAN DEFAULT FALSE,
+    estres_termico BOOLEAN DEFAULT FALSE,
+    estres_nutricional BOOLEAN DEFAULT FALSE,
+    
+    -- Claves foráneas
+    FOREIGN KEY (id_simulacion) REFERENCES simulacion(id_simulacion) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_simulacion (id_simulacion),
+    INDEX idx_dia (dia),
+    INDEX idx_fecha (fecha_simulada),
+    UNIQUE INDEX idx_simulacion_dia (id_simulacion, dia),
+    
+    -- Restricciones
+    CHECK (dia >= 1),
+    CHECK (salud_planta >= 0 AND salud_planta <= 100),
+    CHECK (humedad_suelo >= 0 AND humedad_suelo <= 100)
+) ENGINE=InnoDB COMMENT='Historial diario del estado del cultivo';
+
+-- ============================================================================
+-- TABLA: evento
+-- Almacena eventos forzados por el usuario o el sistema, y decisiones tomadas
+-- ============================================================================
+CREATE TABLE evento (
+    id_evento BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_simulacion BIGINT NOT NULL,
+    
+    -- Información temporal
+    dia_evento INT NOT NULL COMMENT 'Día en que ocurre el evento',
+    fecha_evento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Tipo de evento (VARCHAR en lugar de ENUM para permitir ampliación sin migración)
+    -- Valores climáticos: sequia, helada, ola_calor, lluvia_torrencial, granizo, viento_fuerte,
+    --   terremoto, tornado, inundacion, nevada, rayo_caido, incendio_proximo,
+    --   niebla_persistente, polvo_sahariano, lluvia_acida
+    -- Suelo: erosion_suelo, salinizacion, acidificacion_suelo
+    -- Biológicos: plaga, enfermedad, malas_hierbas, roya, mildiu, oidio, virus_mosaico,
+    --   pulgones, arana_roja, caracoles, nematodos, aves_plaga, jabalies, langostas
+    -- Técnicos / subrealistas: apagon_riego, contaminacion_quimica, marabunta_hormigas, ola_radiacion_uv
+    -- Acciones del usuario: riego, fertilizacion, tratamiento_fitosanitario, poda, cosecha, otro,
+    --   mulching, control_biologico, enmienda_calcica, instalacion_malla, compostaje, aireacion_suelo
+    tipo_evento VARCHAR(80) NOT NULL,
+    
+    -- Origen del evento
+    origen ENUM('usuario', 'sistema') NOT NULL,
+    
+    -- Detalles del evento
+    intensidad ENUM('leve', 'moderado', 'severo', 'critico') DEFAULT NULL,
+    descripcion TEXT COMMENT 'Descripción detallada del evento',
+    
+    -- Parámetros cuantitativos (según tipo de evento)
+    cantidad DECIMAL(8,2) DEFAULT NULL COMMENT 'mm de agua, kg/ha de fertilizante, etc.',
+    tipo_producto VARCHAR(100) DEFAULT NULL COMMENT 'Tipo de fertilizante, pesticida, etc.',
+    
+    -- Análisis de impacto
+    impacto_estimado DECIMAL(5,2) DEFAULT NULL COMMENT 'Impacto estimado en %',
+    impacto_real DECIMAL(5,2) DEFAULT NULL COMMENT 'Impacto real calculado en %',
+    
+    -- Coste económico (para RF-M10)
+    coste_euros DECIMAL(8,2) DEFAULT 0.0 COMMENT 'Coste de la acción en euros',
+    
+    -- Claves foráneas
+    FOREIGN KEY (id_simulacion) REFERENCES simulacion(id_simulacion) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_simulacion (id_simulacion),
+    INDEX idx_tipo_evento (tipo_evento),
+    INDEX idx_dia_evento (dia_evento),
+    INDEX idx_origen (origen),
+    
+    -- Restricciones
+    CHECK (dia_evento >= 1),
+    CHECK (coste_euros >= 0)
+) ENGINE=InnoDB COMMENT='Eventos y decisiones durante la simulación';
+
+-- ============================================================================
+-- TABLA: resultado
+-- Almacena el resultado final cuando una simulación termina
+-- ============================================================================
+CREATE TABLE resultado (
+    id_resultado BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_simulacion BIGINT NOT NULL UNIQUE,
+    
+    -- Información temporal
+    fecha_finalizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    dia_finalizacion INT NOT NULL COMMENT 'Día en que finalizó',
+    
+    -- Estado final
+    estado_final ENUM('exitoso', 'fracaso_parcial', 'fracaso_total') NOT NULL,
+    etapa_alcanzada ENUM(
+        'germinacion',
+        'emergencia',
+        'vegetativo',
+        'floracion',
+        'fructificacion',
+        'maduracion',
+        'cosecha'
+    ) NOT NULL,
+    
+    -- Métricas de rendimiento
+    rendimiento_kg_ha DECIMAL(8,2) NOT NULL COMMENT 'Rendimiento obtenido en kg/ha',
+    rendimiento_potencial DECIMAL(8,2) DEFAULT NULL COMMENT 'Rendimiento potencial máximo',
+    rendimiento_relativo DECIMAL(5,2) NOT NULL COMMENT 'Porcentaje vs potencial',
+    calidad_producto ENUM('baja', 'media', 'alta', 'excelente') NOT NULL,
+    
+    -- Parámetros finales del cultivo
+    biomasa_final DECIMAL(8,2) DEFAULT NULL COMMENT 'Biomasa final en kg/ha',
+    altura_final DECIMAL(6,2) DEFAULT NULL COMMENT 'Altura final en cm',
+    indice_area_foliar_final DECIMAL(4,2) DEFAULT NULL COMMENT 'LAI final',
+    
+    -- Balance hídrico
+    precipitacion_total DECIMAL(7,2) NOT NULL COMMENT 'Precipitación total en mm',
+    riego_total DECIMAL(7,2) NOT NULL COMMENT 'Riego total aplicado en mm',
+    evapotranspiracion_real DECIMAL(7,2) DEFAULT NULL COMMENT 'ET real en mm',
+    dias_estres_hidrico INT DEFAULT 0 COMMENT 'Días con estrés hídrico',
+    eficiencia_uso_agua DECIMAL(6,3) DEFAULT NULL COMMENT 'kg de producción por m³ de agua',
+    
+    -- Balance nutricional
+    nitrogeno_usado DECIMAL(7,2) NOT NULL COMMENT 'N aportado total en kg/ha',
+    fosforo_usado DECIMAL(7,2) NOT NULL COMMENT 'P aportado total en kg/ha',
+    potasio_usado DECIMAL(7,2) NOT NULL COMMENT 'K aportado total en kg/ha',
+    nitrogeno_extraido DECIMAL(7,2) DEFAULT NULL COMMENT 'N extraído por cultivo',
+    fosforo_extraido DECIMAL(7,2) DEFAULT NULL COMMENT 'P extraído por cultivo',
+    potasio_extraido DECIMAL(7,2) DEFAULT NULL COMMENT 'K extraído por cultivo',
+    
+    -- Indicadores de estrés acumulados
+    dias_estres_termico INT DEFAULT 0 COMMENT 'Días con estrés térmico',
+    dias_estres_nutricional INT DEFAULT 0 COMMENT 'Días con estrés nutricional',
+    
+    -- Análisis de causas (si hubo fracaso)
+    causa_principal ENUM(
+        'sequia',
+        'exceso_agua',
+        'helada',
+        'calor_extremo',
+        'deficiencia_nutrientes',
+        'plaga',
+        'enfermedad',
+        'manejo_inadecuado',
+        'ninguna'
+    ) DEFAULT 'ninguna',
+    dia_critico INT DEFAULT NULL COMMENT 'Día del evento determinante',
+    
+    -- Recomendaciones (almacenadas como JSON)
+    recomendaciones JSON DEFAULT NULL COMMENT 'Array de objetos con recomendaciones',
+    
+    -- Análisis económico (RF-M10)
+    coste_total DECIMAL(10,2) DEFAULT 0.0 COMMENT 'Coste total en euros',
+    ingreso_estimado DECIMAL(10,2) DEFAULT 0.0 COMMENT 'Ingreso estimado en euros',
+    beneficio_neto DECIMAL(10,2) DEFAULT 0.0 COMMENT 'Beneficio neto en euros',
+    
+    -- Claves foráneas
+    FOREIGN KEY (id_simulacion) REFERENCES simulacion(id_simulacion) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_simulacion (id_simulacion),
+    INDEX idx_estado_final (estado_final),
+    INDEX idx_fecha (fecha_finalizacion),
+    
+    -- Restricciones
+    CHECK (rendimiento_kg_ha >= 0),
+    CHECK (rendimiento_relativo >= 0 AND rendimiento_relativo <= 100),
+    CHECK (dias_estres_hidrico >= 0),
+    CHECK (dias_estres_termico >= 0)
+) ENGINE=InnoDB COMMENT='Resultados finales de las simulaciones';
+
+-- ============================================================================
+-- TABLA: economia (Opcional - para RF-M10)
+-- Desglose económico detallado de cada simulación
+-- ============================================================================
+CREATE TABLE economia (
+    id_economia BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_simulacion BIGINT NOT NULL UNIQUE,
+    
+    -- Costes desglosados
+    coste_semillas DECIMAL(8,2) DEFAULT 0.0,
+    coste_fertilizantes DECIMAL(8,2) DEFAULT 0.0,
+    coste_riego DECIMAL(8,2) DEFAULT 0.0,
+    coste_tratamientos DECIMAL(8,2) DEFAULT 0.0,
+    coste_mano_obra DECIMAL(8,2) DEFAULT 0.0,
+    coste_maquinaria DECIMAL(8,2) DEFAULT 0.0,
+    otros_costes DECIMAL(8,2) DEFAULT 0.0,
+    coste_total DECIMAL(10,2) GENERATED ALWAYS AS (
+        coste_semillas + coste_fertilizantes + coste_riego + 
+        coste_tratamientos + coste_mano_obra + coste_maquinaria + otros_costes
+    ) STORED,
+    
+    -- Ingresos
+    precio_venta_kg DECIMAL(6,2) DEFAULT 0.0 COMMENT 'Precio de venta por kg',
+    ingreso_estimado DECIMAL(10,2) DEFAULT 0.0,
+    
+    -- Balance
+    beneficio_neto DECIMAL(10,2) GENERATED ALWAYS AS (
+        ingreso_estimado - coste_total
+    ) STORED,
+    rentabilidad_porcentaje DECIMAL(6,2) DEFAULT NULL COMMENT 'Rentabilidad en %',
+    
+    -- Claves foráneas
+    FOREIGN KEY (id_simulacion) REFERENCES simulacion(id_simulacion) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_simulacion (id_simulacion),
+    
+    -- Restricciones
+    CHECK (coste_semillas >= 0),
+    CHECK (coste_fertilizantes >= 0),
+    CHECK (coste_riego >= 0),
+    CHECK (precio_venta_kg >= 0)
+) ENGINE=InnoDB COMMENT='Análisis económico detallado';
+
+-- ============================================================================
+-- TABLA: escenario_predefinido (Opcional - para RF-S01)
+-- Escenarios creados por profesores para los estudiantes
+-- ============================================================================
+CREATE TABLE escenario_predefinido (
+    id_escenario BIGINT AUTO_INCREMENT PRIMARY KEY,
+    id_creador BIGINT NOT NULL COMMENT 'Usuario que creó el escenario',
+    
+    -- Información básica
+    nombre VARCHAR(200) NOT NULL,
+    descripcion TEXT NOT NULL,
+    objetivo_educativo TEXT COMMENT 'Qué debe aprender el estudiante',
+    nivel_dificultad INT DEFAULT 5 COMMENT 'Dificultad de 1 a 10',
+    
+    -- Configuración del escenario (JSON)
+    configuracion JSON NOT NULL COMMENT 'Configuración completa de terreno, clima y cultivo',
+    eventos_programados JSON DEFAULT NULL COMMENT 'Eventos que ocurrirán automáticamente',
+    
+    -- Metadatos
+    es_publico BOOLEAN DEFAULT TRUE,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    veces_usado INT DEFAULT 0 COMMENT 'Número de veces que se ha usado',
+    valoracion_promedio DECIMAL(3,2) DEFAULT NULL COMMENT 'Valoración de 0 a 5',
+    
+    -- Claves foráneas
+    FOREIGN KEY (id_creador) REFERENCES usuario(id_usuario) ON DELETE CASCADE,
+    
+    -- Índices
+    INDEX idx_creador (id_creador),
+    INDEX idx_dificultad (nivel_dificultad),
+    INDEX idx_publico (es_publico),
+    
+    -- Restricciones
+    CHECK (nivel_dificultad >= 1 AND nivel_dificultad <= 10),
+    CHECK (valoracion_promedio IS NULL OR (valoracion_promedio >= 0 AND valoracion_promedio <= 5))
+) ENGINE=InnoDB COMMENT='Escenarios predefinidos para educación';
+
+-- ============================================================================
+-- DATOS DE EJEMPLO (OPCIONAL)
+-- Insertar algunos datos de prueba
+-- ============================================================================
+
+-- Usuario de prueba
+INSERT INTO usuario (nombre, email, contrasena, rol) VALUES
+('Carlos García', 'carlos@agrisim.com', '$2a$10$example_hash_password', 'estudiante'),
+('María López', 'maria.lopez@university.edu', '$2a$10$example_hash_password', 'profesor'),
+('Juan Martínez', 'juan@farm.com', '$2a$10$example_hash_password', 'agricultor');
+
+-- Simulación de ejemplo
+INSERT INTO simulacion (
+    id_usuario, nombre_simulacion, dia_actual,
+    superficie_hectareas, tipo_suelo, ph_suelo, 
+    nitrogeno_inicial, fosforo_inicial, potasio_inicial,
+    region_climatica, temperatura_media, precipitacion_anual,
+    tipo_cultivo, fecha_siembra, densidad_siembra, sistema_riego,
+    etapa_fenologica, salud_actual, altura_actual, humedad_suelo_actual
+) VALUES (
+    1, 'Tomate Primavera 2025', 45,
+    2.5, 'franco', 6.5,
+    80, 60, 120,
+    'mediterraneo', 24.0, 550.0,
+    'tomate', '2025-03-15', 4.0, 'goteo',
+    'floracion', 85.0, 65.5, 62.0
+);
+
+-- ============================================================================
+-- VISTAS ÚTILES (OPCIONAL)
+-- ============================================================================
+
+-- Vista de simulaciones activas con información del usuario
+CREATE VIEW v_simulaciones_activas AS
+SELECT 
+    s.id_simulacion,
+    s.nombre_simulacion,
+    s.dia_actual,
+    s.tipo_cultivo,
+    s.etapa_fenologica,
+    s.salud_actual,
+    s.estado,
+    u.nombre AS nombre_usuario,
+    u.email,
+    s.fecha_creacion
+FROM simulacion s
+INNER JOIN usuario u ON s.id_usuario = u.id_usuario
+WHERE s.estado = 'en_curso'
+ORDER BY s.fecha_creacion DESC;
+
+-- Vista de resumen de resultados
+CREATE VIEW v_resumen_resultados AS
+SELECT 
+    r.id_resultado,
+    s.nombre_simulacion,
+    s.tipo_cultivo,
+    u.nombre AS nombre_usuario,
+    r.estado_final,
+    r.rendimiento_kg_ha,
+    r.rendimiento_relativo,
+    r.calidad_producto,
+    r.beneficio_neto,
+    r.fecha_finalizacion
+FROM resultado r
+INNER JOIN simulacion s ON r.id_simulacion = s.id_simulacion
+INNER JOIN usuario u ON s.id_usuario = u.id_usuario
+ORDER BY r.fecha_finalizacion DESC;
+
+-- ============================================================================
+-- TRIGGERS (OPCIONAL)
+-- Automatizaciones útiles
+-- ============================================================================
+
+-- Trigger para actualizar veces_usado en escenarios
+-- NOTA: Deshabilitado por ahora. Para habilitarlo, añade el campo id_escenario_base a la tabla simulacion
+/*
+DELIMITER //
+CREATE TRIGGER trg_incrementar_uso_escenario
+AFTER INSERT ON simulacion
+FOR EACH ROW
+BEGIN
+    -- Si la simulación se basa en un escenario predefinido
+    IF NEW.id_escenario_base IS NOT NULL THEN
+        UPDATE escenario_predefinido 
+        SET veces_usado = veces_usado + 1 
+        WHERE id_escenario = NEW.id_escenario_base;
+    END IF;
+END//
+DELIMITER ;
+*/
+
+-- ============================================================================
+-- PROCEDIMIENTOS ALMACENADOS (OPCIONAL)
+-- ============================================================================
+
+-- Procedimiento para obtener estadísticas de un usuario
+DELIMITER //
+CREATE PROCEDURE sp_estadisticas_usuario(IN p_id_usuario BIGINT)
+BEGIN
+    SELECT 
+        COUNT(*) AS total_simulaciones,
+        SUM(CASE WHEN estado = 'completada' THEN 1 ELSE 0 END) AS completadas,
+        SUM(CASE WHEN estado = 'fallida' THEN 1 ELSE 0 END) AS fallidas,
+        SUM(CASE WHEN estado = 'en_curso' THEN 1 ELSE 0 END) AS en_curso,
+        AVG(CASE WHEN estado = 'completada' THEN salud_actual END) AS salud_promedio
+    FROM simulacion
+    WHERE id_usuario = p_id_usuario;
+END//
+DELIMITER ;
+
+-- ============================================================================
+-- MIGRACIÓN: ampliar tipo_evento si la BBDD ya existía como ENUM
+-- Ejecutar SOLO si tu tabla `evento` se creó antes con ENUM y necesitas
+-- aceptar los nuevos tipos de evento añadidos en la simulación.
+-- ============================================================================
+-- ALTER TABLE evento MODIFY COLUMN tipo_evento VARCHAR(80) NOT NULL;
+-- ALTER TABLE simulacion ADD COLUMN eventos_aleatorios BOOLEAN NOT NULL DEFAULT TRUE;
+-- ALTER TABLE simulacion ADD COLUMN modo_invencible BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ============================================================================
+-- FIN DEL SCRIPT
+-- ============================================================================
+
+-- Mostrar resumen de tablas creadas
+SHOW TABLES;
+
+-- Verificar la estructura de una tabla específica (ejemplo)
+-- DESCRIBE simulacion;
+
+SELECT 'Base de datos AgriSim creada exitosamente!' AS mensaje;
