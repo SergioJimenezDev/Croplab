@@ -59,3 +59,6 @@ Thumbs.db
 
 # ===== Claude / agent metadata =====
 .claude/
+
+# Carpeta local con copia de trabajo (no parte del repo)
+croplab/
