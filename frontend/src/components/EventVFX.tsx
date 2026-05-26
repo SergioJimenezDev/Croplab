@@ -295,11 +295,16 @@ const tintStyles: Partial<Record<VFXEffect, React.CSSProperties>> = {
   otro: { background: 'rgba(120,120,120,0.10)' }
 };
 
+// El overlay de partículas va POR DEBAJO del HUD de la simulación:
+//   z-index 0  → .sim-v2-scene (Canvas 3D)
+//   z-index 1  → este overlay de partículas (se queda sobre la escena pero bajo la UI)
+//   z-index ≥8 → toda la UI/HUD del simulador (stats, dock, paneles, header…)
+// Antes estaba en 2000 y tapaba botones, alertas y panel lateral.
 const overlayStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
   pointerEvents: 'none',
-  zIndex: 2000
+  zIndex: 1
 };
 
 const kickResize = () => {

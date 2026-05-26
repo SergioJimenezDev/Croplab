@@ -131,6 +131,9 @@ export interface Simulacion {
   eventosAleatorios?: boolean;
   modoInvencible?: boolean;
   diasMaximos?: number;
+  /** CSV con los tipos de evento permitidos como aleatorios del sistema.
+   *  null/undefined → todos. Lista vacía o "*" → todos. */
+  eventosPermitidos?: string | null;
 }
 
 export interface EstadoDiario {

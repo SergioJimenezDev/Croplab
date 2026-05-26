@@ -258,6 +258,25 @@ export const simulacionService = {
   },
 
   /**
+   * Configura la lista de tipos de evento permitidos como aleatorios.
+   * Pasar `null` → cualquier evento del pool puede ocurrir (por defecto).
+   * Pasar un array → solo esos tipos se generarán aleatoriamente.
+   */
+  setEventosPermitidos: async (id: number, tipos: string[] | null): Promise<Simulacion> => {
+    try {
+      const body = { eventosPermitidos: tipos === null ? null : tipos.join(',') };
+      const response = await api.put<ApiResponse<Simulacion>>(
+        `/simulaciones/${id}/eventos-permitidos`,
+        body
+      );
+      if (response.success && response.data) return response.data;
+      throw new Error(response.message || 'Error al cambiar eventos permitidos');
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || error.message || 'Error al cambiar eventos permitidos');
+    }
+  },
+
+  /**
    * Eliminar simulación
    */
   eliminar: async (id: number): Promise<void> => {

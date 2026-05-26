@@ -144,6 +144,15 @@ public class Simulacion {
     @Column(name = "dias_maximos")
     private Integer diasMaximos = 180;
 
+    /**
+     * Lista CSV de tipos de evento permitidos como aleatorios del sistema.
+     * Si es null o vacío → cualquier evento del pool puede ocurrir.
+     * Si tiene valores → solo se generan eventos cuyo nombre esté en la lista.
+     * Usado por el "Modo realista" y la personalización individual de eventos.
+     */
+    @Column(name = "eventos_permitidos", length = 2000)
+    private String eventosPermitidos;
+
     // Enums
     public enum Estado {
         en_curso, completada, fallida, pausada

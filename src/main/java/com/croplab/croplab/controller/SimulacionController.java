@@ -197,6 +197,27 @@ public class SimulacionController {
         }
     }
 
+    /**
+     * Filtro de eventos que pueden ocurrir aleatoriamente.
+     * Body: { "eventosPermitidos": "sequia,helada,plaga,..." } o null para permitir todos.
+     */
+    @PutMapping("/{id}/eventos-permitidos")
+    public ResponseEntity<ApiResponse<Simulacion>> actualizarEventosPermitidos(
+            @PathVariable Long id,
+            @RequestBody(required = false) java.util.Map<String, String> body,
+            @AuthenticationPrincipal UserPrincipal userPrincipal) {
+        try {
+            String csv = body == null ? null : body.get("eventosPermitidos");
+            Simulacion actualizada = simulacionService.setEventosPermitidos(id, csv, userPrincipal.getId());
+            return ResponseEntity.ok(ApiResponse.success(
+                "Eventos permitidos actualizados",
+                actualizada));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> eliminarSimulacion(
             @PathVariable Long id,

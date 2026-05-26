@@ -30,8 +30,10 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Fondo de cuadrícula tipo cuaderno milimetrado */
-body {
+/* Fondo de cuadrícula tipo cuaderno milimetrado.
+   Lo aplicamos a html y body para que la cuadrícula cubra siempre
+   todo el alto del documento, sin importar cuánto crezca el contenido. */
+html, body {
   background-color: var(--paper-bg);
   background-image:
     /* línea fina cada 8 px */
@@ -42,6 +44,10 @@ body {
     linear-gradient(90deg, var(--paper-grid-strong) 1px, transparent 1px);
   background-size: 8px 8px, 8px 8px, 40px 40px, 40px 40px;
   background-attachment: fixed;
+}
+
+body {
+  background-color: transparent;
 }
 
 code {

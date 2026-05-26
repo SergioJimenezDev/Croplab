@@ -102,6 +102,22 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
 
 const VENTANA_DIAS_ACTIVO = 10;
 
+// Coste base €/ha de cada acción del usuario. ESTA TABLA DEBE COINCIDIR EXACTAMENTE
+// con SimulacionService.calcularCosteEvento() en el backend; en caso contrario el
+// preview que ve el usuario antes de aplicar el evento no encajaría con el cargo real.
+const COSTE_POR_HECTAREA: Partial<Record<TipoEvento, number>> = {
+  riego: 15.00,
+  fertilizacion: 80.00,
+  tratamiento_fitosanitario: 120.00,
+  poda: 60.00,
+  mulching: 70.00,
+  control_biologico: 90.00,
+  enmienda_calcica: 55.00,
+  instalacion_malla: 180.00,
+  compostaje: 50.00,
+  aireacion_suelo: 45.00,
+};
+
 interface EventoActivo {
   evento: Evento;
   info: EventoActivoInfo;
@@ -131,6 +147,41 @@ const calcularEventosActivos = (eventos: Evento[], diaActual: number): EventoAct
   });
   return activos;
 };
+
+// ============================================================
+// Configuración de eventos para el panel de PERSONALIZACIÓN
+// ============================================================
+
+// Universo de eventos que el sistema puede generar aleatoriamente
+// (debe coincidir con el `pool` de SimulacionService.construirEventoAleatorio).
+const EVENTOS_SISTEMA: TipoEvento[] = [
+  'sequia', 'helada', 'ola_calor', 'lluvia_torrencial', 'granizo', 'viento_fuerte',
+  'plaga', 'enfermedad', 'malas_hierbas',
+  'terremoto', 'tornado', 'inundacion', 'nevada', 'rayo_caido',
+  'incendio_proximo', 'niebla_persistente', 'polvo_sahariano', 'lluvia_acida',
+  'erosion_suelo', 'salinizacion', 'acidificacion_suelo',
+  'roya', 'mildiu', 'oidio', 'virus_mosaico',
+  'pulgones', 'arana_roja', 'caracoles', 'nematodos',
+  'aves_plaga', 'jabalies', 'langostas',
+  'apagon_riego', 'contaminacion_quimica', 'marabunta_hormigas', 'ola_radiacion_uv'
+];
+
+// "Modo realista" — eventos que ocurren con cierta frecuencia en agricultura
+// real (sobre todo en el contexto mediterráneo / europeo). Se excluyen:
+//   • Catástrofes geológicas o muy raras: terremoto, tornado, rayo_caido, lluvia_acida.
+//   • Problemas de suelo muy específicos: salinizacion, acidificacion_suelo.
+//   • Enfermedades muy concretas: virus_mosaico.
+//   • Fauna exótica: langostas (no llegan a España).
+//   • Subrealistas / técnicos: apagon_riego, contaminacion_quimica, marabunta_hormigas, ola_radiacion_uv.
+const EVENTOS_REALISTAS: TipoEvento[] = [
+  'sequia', 'helada', 'ola_calor', 'lluvia_torrencial', 'granizo', 'viento_fuerte',
+  'inundacion', 'nevada', 'incendio_proximo', 'niebla_persistente', 'polvo_sahariano',
+  'erosion_suelo',
+  'plaga', 'enfermedad', 'malas_hierbas',
+  'roya', 'mildiu', 'oidio',
+  'pulgones', 'arana_roja', 'caracoles', 'nematodos',
+  'aves_plaga', 'jabalies'
+];
 
 const EVENT_CATEGORIES: EventCategory[] = [
   {
@@ -227,6 +278,7 @@ const SimulationView: React.FC = () => {
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
   const [modalClosing, setModalClosing] = useState(false);
+  const [personalizacionAbierta, setPersonalizacionAbierta] = useState(false);
 
   // Cierra el modal con animación de salida (~280 ms)
   const closeEventModal = () => {
@@ -269,18 +321,81 @@ const SimulationView: React.FC = () => {
     ).evento.tipoEvento as VFXEffect;
   }, [eventosActivosMemo]);
 
+  // Clima ambiental derivado de los eventos activos. Cambia los doodles dibujados
+  // en las paredes del cubo de papel (sol, gotas, copos…).
+  const climaEscena = React.useMemo<'normal' | 'caluroso' | 'lluvioso' | 'frio'>(() => {
+    const tipos = new Set(eventosActivosMemo.map(e => e.evento.tipoEvento));
+    if (tipos.has('sequia') || tipos.has('ola_calor') || tipos.has('incendio_proximo')) return 'caluroso';
+    if (tipos.has('lluvia_torrencial') || tipos.has('inundacion') || tipos.has('lluvia_acida')) return 'lluvioso';
+    if (tipos.has('helada') || tipos.has('nevada')) return 'frio';
+    return 'normal';
+  }, [eventosActivosMemo]);
+
+  // Lista de banderitas que se clavan en el suelo 3D — una por evento activo.
+  const eventosBanderitas = React.useMemo(() => (
+    eventosActivosMemo.map(({ evento, info }) => ({
+      id: evento.idEvento ?? `${evento.tipoEvento}-${evento.diaEvento}`,
+      emoji: info.emoji,
+      color: '#fff4cc'
+    }))
+  ), [eventosActivosMemo]);
+
+  // El espantapájaros aparece mientras el usuario tenga al menos una malla
+  // (vallado / antipájaros / antigranizo) instalada en este cultivo.
+  const tieneMallas = React.useMemo(
+    () => eventos.some(e => e.tipoEvento === 'instalacion_malla'),
+    [eventos]
+  );
+
+  // Cuando un evento activo desaparece (porque el usuario aplicó la acción
+  // correctora), lo mantenemos un par de segundos en pantalla con animación de
+  // tachado para que se note visualmente que se ha resuelto.
+  type EventoResuelto = { evento: Evento; info: EventoActivoInfo; resolvedAt: number };
+  const [eventosResueltosRecientes, setEventosResueltosRecientes] = useState<EventoResuelto[]>([]);
+  const prevActivosIdsRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    const prevIds = prevActivosIdsRef.current;
+    const currentIds = new Set<number>();
+    eventosActivosMemo.forEach(a => { if (a.evento.idEvento != null) currentIds.add(a.evento.idEvento); });
+
+    // Eventos que estaban activos en el render previo pero ya no lo están = resueltos
+    const resueltosAhora: EventoResuelto[] = [];
+    prevIds.forEach(id => {
+      if (currentIds.has(id)) return;
+      // Sólo añadimos si tenemos info completa (a veces id puede no estar en eventos[])
+      const ev = eventos.find(e => e.idEvento === id);
+      const info = ev ? EVENTOS_PERSISTENTES[ev.tipoEvento] : undefined;
+      if (ev && info) resueltosAhora.push({ evento: ev, info, resolvedAt: Date.now() });
+    });
+    if (resueltosAhora.length > 0) {
+      setEventosResueltosRecientes(prev => [...prev, ...resueltosAhora]);
+    }
+    prevActivosIdsRef.current = currentIds;
+  }, [eventosActivosMemo, eventos]);
+
+  // Limpieza: borra del estado los eventos resueltos cuya animación ya ha terminado (2s).
+  useEffect(() => {
+    if (eventosResueltosRecientes.length === 0) return;
+    const t = window.setTimeout(() => {
+      const ahora = Date.now();
+      setEventosResueltosRecientes(prev => prev.filter(r => ahora - r.resolvedAt < 2000));
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [eventosResueltosRecientes]);
+
   useEffect(() => {
     loadSimulationData();
   }, [id]);
 
   // Detecta eventos PUNTUALES nuevos del sistema (no persistentes) → flash 4s.
   // Los persistentes no se manejan aquí; se reflejan continuamente vía baseVFX.
+  // IMPORTANTE: la inicialización del set de eventos "conocidos" se hace en
+  // loadSimulationData (después del primer fetch real). Si la hiciéramos aquí
+  // con el array vacío del primer render, al recargar la página todos los
+  // eventos antiguos se considerarían "nuevos" y dispararían un flash residual.
   useEffect(() => {
-    if (!eventosInitialisedRef.current) {
-      eventos.forEach(e => { if (e.idEvento != null) knownEventoIdsRef.current.add(e.idEvento); });
-      eventosInitialisedRef.current = true;
-      return;
-    }
+    if (!eventosInitialisedRef.current) return; // esperamos al primer load
     let puntualMasReciente: Evento | null = null;
     eventos.forEach(ev => {
       if (ev.idEvento == null) return;
@@ -314,6 +429,17 @@ const SimulationView: React.FC = () => {
       setSimulacion(simData);
       setHistorial(historialData);
       setEventos(eventosData);
+      // En el PRIMER load (tras montar el componente o recargar la página),
+      // marcamos todos los eventos existentes como "conocidos" para que el
+      // detector de flashes no los considere nuevos. Recargas posteriores
+      // (avanzar día, aplicar evento) ya tienen el ref inicializado y solo
+      // se anota cada nuevo id.
+      if (!eventosInitialisedRef.current) {
+        eventosData.forEach((e: Evento) => {
+          if (e.idEvento != null) knownEventoIdsRef.current.add(e.idEvento);
+        });
+        eventosInitialisedRef.current = true;
+      }
     } catch (error: any) {
       console.error('Error al cargar simulación:', error);
       alert(error.message);
@@ -326,6 +452,10 @@ const SimulationView: React.FC = () => {
     if (!id || !simulacion) return;
 
     setIsAdvancing(true);
+    // Cancelar inmediatamente cualquier flash del día anterior — si no, su
+    // timer interno de 4 s sigue corriendo y las partículas/efectos del
+    // evento ya pasado se ven durante un par de segundos en el día nuevo.
+    setFlashVFX(null);
     try {
       const nuevoEstado = await simulacionService.avanzarDia(parseInt(id));
       await loadSimulationData();
@@ -340,6 +470,7 @@ const SimulationView: React.FC = () => {
     if (!id) return;
 
     setIsAdvancing(true);
+    setFlashVFX(null);
     try {
       // Una sola petición HTTP en lugar de N (evita el cold start + latencia × N)
       await simulacionService.avanzarVariosDias(parseInt(id), dias);
@@ -355,14 +486,25 @@ const SimulationView: React.FC = () => {
     if (!id || !nuevoEvento.tipoEvento) return;
 
     try {
+      // No enviamos costeEuros: el backend lo recalcula a partir del tipo y la superficie.
+      // Si lo enviáramos con un valor erróneo (p.ej. 0 para mulching), igual quedaría
+      // sobrescrito en el servidor pero confundía al desarrollador leyendo el código.
       const eventoData = {
         ...nuevoEvento,
         diaEvento: simulacion?.diaActual || 1,
-        origen: 'usuario' as OrigenEvento,
-        costeEuros: calcularCosteEvento(nuevoEvento.tipoEvento, nuevoEvento.cantidad || 0)
+        origen: 'usuario' as OrigenEvento
       };
 
       const tipoAplicado = nuevoEvento.tipoEvento;
+
+      // ¿Esta acción resuelve algún evento persistente activo ahora mismo?
+      // Si es así, no disparamos el flash de la acción: el baseVFX del evento
+      // resuelto cae a null al instante (loadSimulationData lo recalcula) y
+      // las partículas desaparecen sin que el flash de 4 s las suplante.
+      const resuelveActivoActual = eventosActivosMemo.some(({ info }) =>
+        info.acciones.includes(tipoAplicado as TipoEvento)
+      );
+
       await simulacionService.aplicarEvento(parseInt(id), eventoData);
       await loadSimulationData();
       closeEventModal();
@@ -373,8 +515,14 @@ const SimulationView: React.FC = () => {
       });
 
       if (tipoAplicado) {
-        // Acción manual: mostrar flash temporal del efecto que se acaba de aplicar.
-        setFlashVFX(tipoAplicado as VFXEffect);
+        if (!resuelveActivoActual) {
+          // Acción manual sin resolver nada: mostrar flash temporal de feedback.
+          setFlashVFX(tipoAplicado as VFXEffect);
+        } else {
+          // La acción resolvió un evento → forzamos también flashVFX a null por
+          // si quedaba un flash anterior pendiente, así la transición es limpia.
+          setFlashVFX(null);
+        }
         // Si el evento aplicado es persistente (plaga, sequía, enfermedad...), abrir el
         // panel de alertas en la pestaña "Alertas" para que el usuario lo vea de inmediato.
         if (EVENTOS_PERSISTENTES[tipoAplicado]) {
@@ -387,16 +535,15 @@ const SimulationView: React.FC = () => {
     }
   };
 
-  const calcularCosteEvento = (tipo: TipoEvento, cantidad: number): number => {
-    const costes: Record<string, number> = {
-      riego: 0.5,
-      fertilizacion: 2.0,
-      tratamiento_fitosanitario: 5.0,
-      poda: 10.0,
-      cosecha: 15.0
-    };
-
-    return (costes[tipo] || 0) * cantidad;
+  // Mirror exacto de SimulacionService.calcularCosteEvento(). El backend SIEMPRE
+  // recalcula el coste a partir del tipo de evento × superficie; aquí lo replicamos
+  // para que el usuario vea el importe real antes de aplicar.
+  const calcularCosteEvento = (tipo?: TipoEvento): number => {
+    if (!tipo) return 0;
+    const costeBase = COSTE_POR_HECTAREA[tipo];
+    if (costeBase === undefined) return 0;
+    const superficie = Number(simulacion?.superficieHectareas ?? 0);
+    return costeBase * superficie;
   };
 
   const toggleEventosAleatorios = async () => {
@@ -419,6 +566,54 @@ const SimulationView: React.FC = () => {
     } catch (error: any) {
       alert(error.message || 'Error al cambiar modo invencible');
     }
+  };
+
+  // ============================================================
+  // PERSONALIZACIÓN: eventos permitidos
+  // ============================================================
+  // Set actual de tipos permitidos como evento aleatorio del sistema.
+  // Si el backend devuelve null/vacío, interpretamos "todos los del pool".
+  const eventosPermitidosSet: Set<string> = React.useMemo(() => {
+    const csv = simulacion?.eventosPermitidos;
+    if (csv == null || csv.trim() === '') return new Set(EVENTOS_SISTEMA);
+    return new Set(csv.split(',').map(s => s.trim()).filter(Boolean));
+  }, [simulacion?.eventosPermitidos]);
+
+  // Etiqueta legible del modo actual.
+  const modoEventosLabel: 'Todos' | 'Modo realista' | 'Personalizado' = React.useMemo(() => {
+    if (eventosPermitidosSet.size === EVENTOS_SISTEMA.length) return 'Todos';
+    if (
+      eventosPermitidosSet.size === EVENTOS_REALISTAS.length &&
+      EVENTOS_REALISTAS.every(e => eventosPermitidosSet.has(e))
+    ) return 'Modo realista';
+    return 'Personalizado';
+  }, [eventosPermitidosSet]);
+
+  const guardarEventosPermitidos = async (lista: string[] | null) => {
+    if (!id) return;
+    try {
+      const actualizada = await simulacionService.setEventosPermitidos(parseInt(id), lista);
+      setSimulacion(actualizada);
+    } catch (err: any) {
+      alert(err.message || 'Error al guardar eventos permitidos');
+    }
+  };
+
+  const toggleEventoPermitido = (tipo: TipoEvento) => {
+    const nueva = new Set(eventosPermitidosSet);
+    if (nueva.has(tipo)) nueva.delete(tipo);
+    else nueva.add(tipo);
+    // Si quedan TODOS marcados, mandamos null (= comportamiento por defecto del backend).
+    if (nueva.size === EVENTOS_SISTEMA.length) {
+      guardarEventosPermitidos(null);
+    } else {
+      guardarEventosPermitidos(Array.from(nueva));
+    }
+  };
+
+  const aplicarPresetEventos = (preset: 'todos' | 'realista') => {
+    if (preset === 'todos') guardarEventosPermitidos(null);
+    else guardarEventosPermitidos([...EVENTOS_REALISTAS]);
   };
 
   const finalizarSimulacion = async () => {
@@ -463,14 +658,30 @@ const SimulationView: React.FC = () => {
   const baseVFX: VFXEffect | null = baseVFXMemo;
   // El flash temporal tiene prioridad; cuando termina, vuelve el base (o null).
   const currentVFX: VFXEffect | null = flashVFX ?? baseVFX;
-  const currentVFXDuration: number | null = flashVFX ? 4000 : null;
+  // Algunos eventos llevan una coreografía 3D más larga (rayos múltiples,
+  // terremoto con sacudida sostenida...) y necesitan más tiempo de flash
+  // para que la animación termine antes de que se desactive.
+  const FLASH_DURATIONS_MS: Partial<Record<string, number>> = {
+    rayo_caido: 6000,
+    terremoto: 5000,
+    inundacion: 5000
+  };
+  const currentVFXDuration: number | null = flashVFX
+    ? (FLASH_DURATIONS_MS[flashVFX] ?? 4000)
+    : null;
 
   return (
     <div className={`sim-v2 ${sidePanelFullscreen ? 'sim-v2-fullscreen-active' : ''}`}>
       {/* Fondo 3D */}
       <div className="sim-v2-scene">
         <Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#cfe7ff', color: '#1c2421', fontFamily: 'var(--font-hand, sans-serif)', fontSize: '1.5rem' }}>Cargando escena…</div>}>
-          <FarmScene simulacion={simulacion} vfxEvent={currentVFX} />
+          <FarmScene
+            simulacion={simulacion}
+            vfxEvent={currentVFX}
+            clima={climaEscena}
+            eventosActivos={eventosBanderitas}
+            hasMallas={tieneMallas}
+          />
         </Suspense>
       </div>
 
@@ -607,8 +818,9 @@ const SimulationView: React.FC = () => {
           {selectedTab === 'alertas' && (
               <>
                 {(() => {
-                  const activos = calcularEventosActivos(eventos, simulacion.diaActual);
-                  if (activos.length === 0) {
+                  const activos = eventosActivosMemo;
+                  const resueltos = eventosResueltosRecientes;
+                  if (activos.length === 0 && resueltos.length === 0) {
                     return (
                       <div className="sim-v2-activos sim-v2-activos-empty">
                         <h3>🚨 Eventos activos</h3>
@@ -619,9 +831,11 @@ const SimulationView: React.FC = () => {
                   return (
                     <div className="sim-v2-activos">
                       <h3>🚨 Eventos activos ({activos.length})</h3>
-                      <p className="sim-v2-activos-hint">
-                        Estos problemas siguen afectando al cultivo hasta que apliques la acción correctora.
-                      </p>
+                      {activos.length > 0 && (
+                        <p className="sim-v2-activos-hint">
+                          Estos problemas siguen afectando al cultivo hasta que apliques la acción correctora.
+                        </p>
+                      )}
                       {activos.map(({ evento, info }) => (
                         <div key={evento.idEvento} className="sim-v2-activo-card">
                           <div className="sim-v2-activo-head">
@@ -637,6 +851,18 @@ const SimulationView: React.FC = () => {
                           </div>
                           <div className="sim-v2-activo-accion">
                             💡 <span>{info.accionTexto}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {/* Eventos recién resueltos: aparecen tachados durante ~2 s */}
+                      {resueltos.map(({ evento, info }) => (
+                        <div key={`resolved-${evento.idEvento}`} className="sim-v2-activo-card sim-v2-activo-resuelto">
+                          <div className="sim-v2-activo-head">
+                            <span className="sim-v2-activo-emoji">{info.emoji}</span>
+                            <div className="sim-v2-activo-titulo">
+                              <strong>{info.nombre}</strong>
+                              <small>✅ Resuelto</small>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -852,32 +1078,17 @@ const SimulationView: React.FC = () => {
         </div>
       </aside>
 
-      {/* Dock inferior-izquierda: ajustes de partida */}
+      {/* Dock inferior-izquierda: personalización + finalizar */}
       <div className="sim-v2-settings-dock">
         <button
           type="button"
-          className={`sim-v2-toggle ${eventosAleatoriosOn ? 'on' : 'off'}`}
-          onClick={toggleEventosAleatorios}
+          className="sim-v2-toggle sim-v2-perso-btn"
+          onClick={() => setPersonalizacionAbierta(true)}
           disabled={simulacion.estado !== 'en_curso'}
-          title={eventosAleatoriosOn
-            ? 'Eventos aleatorios ON — el sistema generará problemas al avanzar días'
-            : 'Eventos aleatorios OFF — solo lo que apliques manualmente'}
+          title="Configurar modos de juego y eventos permitidos"
         >
-          <span className="sim-v2-toggle-icon">{eventosAleatoriosOn ? '🎲' : '⏸️'}</span>
-          <span className="sim-v2-toggle-text">Aleatorios <strong>{eventosAleatoriosOn ? 'ON' : 'OFF'}</strong></span>
-        </button>
-
-        <button
-          type="button"
-          className={`sim-v2-toggle ${modoInvencibleOn ? 'on invencible' : 'off'}`}
-          onClick={toggleModoInvencible}
-          disabled={simulacion.estado !== 'en_curso'}
-          title={modoInvencibleOn
-            ? 'Modo invencible ON — la salud se mantiene al 100% siempre'
-            : 'Modo invencible OFF — la salud baja normalmente'}
-        >
-          <span className="sim-v2-toggle-icon">🛡️</span>
-          <span className="sim-v2-toggle-text">Invencible <strong>{modoInvencibleOn ? 'ON' : 'OFF'}</strong></span>
+          <span className="sim-v2-toggle-icon">⚙️</span>
+          <span className="sim-v2-toggle-text">Personalización</span>
         </button>
 
         <button
@@ -890,6 +1101,160 @@ const SimulationView: React.FC = () => {
           🏁 <span>Finalizar</span>
         </button>
       </div>
+
+      {/* Panel modal de personalización */}
+      {personalizacionAbierta && (
+        <div
+          className="sim-v2-perso-overlay"
+          onClick={() => setPersonalizacionAbierta(false)}
+        >
+          <div
+            className="sim-v2-perso-panel"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <header className="sim-v2-perso-header">
+              <h3>⚙️ Personalización de la partida</h3>
+              <button
+                type="button"
+                className="sim-v2-perso-close"
+                onClick={() => setPersonalizacionAbierta(false)}
+                aria-label="Cerrar personalización"
+              >
+                ✕
+              </button>
+            </header>
+
+            <div className="sim-v2-perso-body">
+              {/* === Modos de juego === */}
+              <section className="sim-v2-perso-section">
+                <h4>Modos de juego</h4>
+                <div className="sim-v2-perso-modes">
+                  <button
+                    type="button"
+                    className={`sim-v2-perso-toggle ${eventosAleatoriosOn ? 'on' : 'off'}`}
+                    onClick={toggleEventosAleatorios}
+                  >
+                    <span className="sim-v2-perso-toggle-icon">
+                      {eventosAleatoriosOn ? '🎲' : '⏸️'}
+                    </span>
+                    <span className="sim-v2-perso-toggle-body">
+                      <strong>Eventos aleatorios</strong>
+                      <small>
+                        {eventosAleatoriosOn
+                          ? 'El sistema generará problemas al avanzar días.'
+                          : 'Solo ocurrirá lo que apliques manualmente.'}
+                      </small>
+                    </span>
+                    <span className={`sim-v2-perso-pill ${eventosAleatoriosOn ? 'on' : 'off'}`}>
+                      {eventosAleatoriosOn ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sim-v2-perso-toggle ${modoInvencibleOn ? 'on invencible' : 'off'}`}
+                    onClick={toggleModoInvencible}
+                  >
+                    <span className="sim-v2-perso-toggle-icon">🛡️</span>
+                    <span className="sim-v2-perso-toggle-body">
+                      <strong>Modo invencible</strong>
+                      <small>
+                        {modoInvencibleOn
+                          ? 'La salud se mantiene al 100%.'
+                          : 'La salud baja normalmente.'}
+                      </small>
+                    </span>
+                    <span className={`sim-v2-perso-pill ${modoInvencibleOn ? 'invencible' : 'off'}`}>
+                      {modoInvencibleOn ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+                </div>
+              </section>
+
+              {/* === Eventos del sistema permitidos === */}
+              <section className="sim-v2-perso-section">
+                <div className="sim-v2-perso-section-head">
+                  <h4>Eventos del sistema permitidos</h4>
+                  <span className={`sim-v2-perso-mode-badge mode-${modoEventosLabel.replace(/\s+/g, '-').toLowerCase()}`}>
+                    {modoEventosLabel}
+                  </span>
+                </div>
+                <p className="sim-v2-perso-hint">
+                  Solo los eventos marcados podrán aparecer aleatoriamente. El{' '}
+                  <strong>Modo realista</strong> deja activos únicamente los desastres y
+                  problemas comunes en agricultura real; un tornado, por ejemplo, es
+                  realista pero poco común y queda fuera.
+                </p>
+
+                <div className="sim-v2-perso-presets">
+                  <button
+                    type="button"
+                    className={`sim-v2-perso-preset ${modoEventosLabel === 'Todos' ? 'active' : ''}`}
+                    onClick={() => aplicarPresetEventos('todos')}
+                  >
+                    🌐 Todos los eventos
+                  </button>
+                  <button
+                    type="button"
+                    className={`sim-v2-perso-preset ${modoEventosLabel === 'Modo realista' ? 'active' : ''}`}
+                    onClick={() => aplicarPresetEventos('realista')}
+                  >
+                    🌾 Modo realista
+                  </button>
+                </div>
+
+                {eventosPermitidosSet.size === 0 && (
+                  <div className="sim-v2-perso-warning">
+                    ⚠️ No hay ningún evento marcado. Para desactivar por completo los
+                    eventos aleatorios usa el toggle <em>Eventos aleatorios</em>.
+                  </div>
+                )}
+
+                <div className="sim-v2-perso-cats">
+                  {EVENT_CATEGORIES
+                    .filter(cat => cat.titulo !== 'Manejo del Cultivo')
+                    .map(cat => (
+                      <div key={cat.titulo} className="sim-v2-perso-cat">
+                        <h5>
+                          <span>{cat.emoji}</span> {cat.titulo}
+                        </h5>
+                        <div className="sim-v2-perso-events">
+                          {cat.eventos
+                            .filter(ev => EVENTOS_SISTEMA.includes(ev.tipo))
+                            .map(ev => {
+                              const checked = eventosPermitidosSet.has(ev.tipo);
+                              const realista = EVENTOS_REALISTAS.includes(ev.tipo);
+                              return (
+                                <label
+                                  key={ev.tipo}
+                                  className={`sim-v2-perso-event ${checked ? 'checked' : ''}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleEventoPermitido(ev.tipo)}
+                                  />
+                                  <span className="sim-v2-perso-event-icon">{ev.icono}</span>
+                                  <span className="sim-v2-perso-event-name">{ev.nombre}</span>
+                                  {realista && (
+                                    <span className="sim-v2-perso-event-tag" title="Común en agricultura real">
+                                      realista
+                                    </span>
+                                  )}
+                                </label>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Action dock flotante */}
       <div className="sim-v2-dock">
@@ -1004,7 +1369,7 @@ const SimulationView: React.FC = () => {
 
               {['riego', 'fertilizacion', 'tratamiento_fitosanitario', 'poda'].includes(nuevoEvento.tipoEvento || '') && (
                 <div className="form-group">
-                  <label>Cantidad/Intensidad</label>
+                  <label>Cantidad (informativo)</label>
                   <input
                     type="number"
                     value={nuevoEvento.cantidad || 0}
@@ -1014,10 +1379,10 @@ const SimulationView: React.FC = () => {
                     step="0.1"
                   />
                   <small className="help-text">
-                    {nuevoEvento.tipoEvento === 'riego' && 'Litros de agua'}
-                    {nuevoEvento.tipoEvento === 'fertilizacion' && 'Kilogramos de fertilizante'}
-                    {nuevoEvento.tipoEvento === 'tratamiento_fitosanitario' && 'Litros de producto'}
-                    {nuevoEvento.tipoEvento === 'poda' && 'Número de plantas'}
+                    {nuevoEvento.tipoEvento === 'riego' && 'Litros de agua aplicados (no altera el coste, sólo se guarda para estadísticas).'}
+                    {nuevoEvento.tipoEvento === 'fertilizacion' && 'Kilogramos de fertilizante (informativo).'}
+                    {nuevoEvento.tipoEvento === 'tratamiento_fitosanitario' && 'Litros de producto (informativo).'}
+                    {nuevoEvento.tipoEvento === 'poda' && 'Número de plantas podadas (informativo).'}
                   </small>
                 </div>
               )}
@@ -1058,9 +1423,17 @@ const SimulationView: React.FC = () => {
                 />
               </div>
 
-              {nuevoEvento.tipoEvento && nuevoEvento.cantidad && (
+              {nuevoEvento.tipoEvento && COSTE_POR_HECTAREA[nuevoEvento.tipoEvento] !== undefined && (
                 <div className="cost-info">
-                  <strong>Coste estimado:</strong> {calcularCosteEvento(nuevoEvento.tipoEvento, nuevoEvento.cantidad).toFixed(2)} €
+                  <strong>Coste estimado:</strong> €{calcularCosteEvento(nuevoEvento.tipoEvento).toFixed(2)}
+                  <small style={{ display: 'block', marginTop: '0.25rem', opacity: 0.75 }}>
+                    €{COSTE_POR_HECTAREA[nuevoEvento.tipoEvento]!.toFixed(2)}/ha × {Number(simulacion?.superficieHectareas ?? 0).toFixed(2)} ha
+                    {simulacion && Number(simulacion.presupuestoActual ?? 0) < calcularCosteEvento(nuevoEvento.tipoEvento) && (
+                      <span style={{ color: '#e53935', fontWeight: 600, marginLeft: '0.5rem' }}>
+                        ⚠️ Presupuesto insuficiente
+                      </span>
+                    )}
+                  </small>
                 </div>
               )}
             </div>

@@ -60,8 +60,100 @@ const getEventIcon = (tipoEvento: string): string => {
   return icons[tipoEvento] || '📌';
 };
 
+// Multiplicador de intensidad. DEBE coincidir con SimulacionService.factorIntensidad()
+// en el backend o el usuario verá daños que no encajan con la salud que pierde.
+const FACTOR_INTENSIDAD: Record<string, number> = {
+  leve: 0.5,
+  moderado: 1.0,
+  severo: 1.6,
+  critico: 2.4
+};
+
+const factor = (intensidad?: string): number =>
+  intensidad ? (FACTOR_INTENSIDAD[intensidad] ?? 1.0) : 1.0;
+
+// Daño base (salud / humedad / altura) de cada evento negativo, igual que en
+// SimulacionService.aplicarEfectosEvento. Permite mostrar el daño real esperado.
+const DANIO_BASE: Record<string, { salud?: number; humedad?: number; alturaPct?: number }> = {
+  plaga: { salud: 18 },
+  enfermedad: { salud: 22 },
+  malas_hierbas: { salud: 8 },
+  sequia: { salud: 15, humedad: 45 },
+  helada: { salud: 25 },
+  ola_calor: { salud: 12, humedad: 30 },
+  lluvia_torrencial: { salud: 5 },
+  granizo: { salud: 22 },
+  viento_fuerte: { salud: 10 },
+  terremoto: { salud: 18, humedad: 15 },
+  tornado: { salud: 30, alturaPct: 30 },
+  inundacion: { salud: 20 },
+  nevada: { salud: 18 },
+  rayo_caido: { salud: 15 },
+  incendio_proximo: { salud: 25, humedad: 25 },
+  niebla_persistente: { salud: 5 },
+  polvo_sahariano: { salud: 7 },
+  lluvia_acida: { salud: 10 },
+  erosion_suelo: { salud: 10 },
+  salinizacion: { salud: 12, humedad: 10 },
+  acidificacion_suelo: { salud: 10 },
+  roya: { salud: 14 },
+  mildiu: { salud: 14 },
+  oidio: { salud: 14 },
+  virus_mosaico: { salud: 16 },
+  pulgones: { salud: 12 },
+  arana_roja: { salud: 12 },
+  caracoles: { salud: 8 },
+  nematodos: { salud: 15 },
+  aves_plaga: { salud: 8 },
+  jabalies: { salud: 22, alturaPct: 15 },
+  langostas: { salud: 25 },
+  apagon_riego: { humedad: 25 },
+  contaminacion_quimica: { salud: 22 },
+  marabunta_hormigas: { salud: 9 },
+  ola_radiacion_uv: { salud: 8 }
+};
+
+const calcularDanio = (tipo: string, intensidad?: string) => {
+  const base = DANIO_BASE[tipo];
+  if (!base) return null;
+  const f = factor(intensidad);
+  return {
+    salud: base.salud !== undefined ? Math.round(base.salud * f) : undefined,
+    humedad: base.humedad !== undefined ? Math.round(base.humedad * f) : undefined,
+    // Altura escala como en el backend: porcentaje * f, con tope al 80% (tornado) o 50% (jabalí)
+    alturaPct: base.alturaPct !== undefined
+      ? Math.round(Math.min(tipo === 'tornado' ? 80 : 50, base.alturaPct * f))
+      : undefined
+  };
+};
+
 const getEventEffects = (tipoEvento: string, intensidad?: string): { effect: string; type: 'positive' | 'negative' | 'neutral' }[] => {
-  const effects: { [key: string]: { effect: string; type: 'positive' | 'negative' | 'neutral' }[] } = {
+  // Para los eventos del DANIO_BASE generamos los textos a partir de la intensidad real,
+  // así que coinciden exactamente con el daño que aplica el backend en este evento concreto.
+  const danio = calcularDanio(tipoEvento, intensidad);
+  if (danio && (danio.salud !== undefined || danio.humedad !== undefined || danio.alturaPct !== undefined)) {
+    const items: { effect: string; type: 'positive' | 'negative' | 'neutral' }[] = [];
+    if (danio.salud !== undefined && danio.salud > 0) {
+      items.push({ effect: `-${danio.salud}% Salud${intensidad ? ` (intensidad ${intensidad})` : ''}`, type: 'negative' });
+    }
+    if (danio.humedad !== undefined && danio.humedad > 0) {
+      items.push({ effect: `-${danio.humedad}% Humedad del suelo`, type: 'negative' });
+    }
+    if (danio.alturaPct !== undefined && danio.alturaPct > 0) {
+      items.push({ effect: `-${danio.alturaPct}% Altura por daño físico`, type: 'negative' });
+    }
+    // Conservamos también el texto descriptivo / solución del catálogo siguiente
+    const extra = (CATALOGO_EFECTOS[tipoEvento] || []).filter(e => e.type !== 'negative' || /Sin cura|sin cura|Requiere|Daño/i.test(e.effect));
+    return [...items, ...extra];
+  }
+  const effects = CATALOGO_EFECTOS;
+  return effects[tipoEvento] || [{ effect: 'Efectos desconocidos', type: 'neutral' }];
+};
+
+// Catálogo descriptivo: descripciones/soluciones por tipo. Para los eventos con daño
+// numérico (en DANIO_BASE) el daño en % se calcula dinámicamente arriba; aquí solo
+// dejamos los textos de contexto y la pista de solución.
+const CATALOGO_EFECTOS: { [key: string]: { effect: string; type: 'positive' | 'negative' | 'neutral' }[] } = {
     // Eventos positivos (acciones del usuario)
     riego: [
       { effect: '+35% Humedad del suelo', type: 'positive' },
@@ -84,189 +176,150 @@ const getEventEffects = (tipoEvento: string, intensidad?: string): { effect: str
       { effect: `Coste: €60/ha`, type: 'neutral' }
     ],
 
-    // Eventos negativos
+    // Eventos negativos — los % de daño los pinta calcularDanio() arriba
+    // según la intensidad real; aquí solo dejamos descripciones/solución.
     sequia: [
-      { effect: '-45% Humedad del suelo', type: 'negative' },
-      { effect: '-15% Salud', type: 'negative' },
       { effect: 'Estrés hídrico severo', type: 'negative' }
     ],
     helada: [
-      { effect: '-25% Salud', type: 'negative' },
       { effect: 'Daño por congelación', type: 'negative' },
       { effect: 'Puede matar la planta', type: 'negative' }
     ],
     ola_calor: [
-      { effect: '-30% Humedad', type: 'negative' },
-      { effect: '-12% Salud', type: 'negative' },
       { effect: 'Estrés térmico', type: 'negative' }
     ],
     lluvia_torrencial: [
       { effect: '+100% Humedad (saturación)', type: 'neutral' },
-      { effect: '-5% Salud (exceso de agua)', type: 'negative' },
       { effect: 'Posible encharcamiento', type: 'negative' }
     ],
     granizo: [
-      { effect: '-35% Salud', type: 'negative' },
       { effect: 'Daño físico severo', type: 'negative' },
       { effect: 'Afecta la producción', type: 'negative' }
     ],
     viento_fuerte: [
-      { effect: '-10% Salud', type: 'negative' },
       { effect: 'Daño mecánico', type: 'negative' }
     ],
     plaga: [
-      { effect: intensidad === 'severo' || intensidad === 'critico' ? '-25 a -35% Salud' : '-8 a -15% Salud', type: 'negative' },
       { effect: 'Requiere tratamiento urgente', type: 'negative' },
       { effect: 'Daño continuo si no se trata', type: 'negative' }
     ],
     enfermedad: [
-      { effect: intensidad === 'severo' || intensidad === 'critico' ? '-30 a -40% Salud' : '-10 a -18% Salud', type: 'negative' },
       { effect: 'CRÍTICO: Requiere tratamiento inmediato', type: 'negative' },
       { effect: 'Puede propagarse', type: 'negative' }
     ],
     malas_hierbas: [
-      { effect: '-8% Salud', type: 'negative' },
       { effect: 'Compiten por nutrientes', type: 'negative' }
     ],
 
     // === Nuevas catástrofes ===
     terremoto: [
-      { effect: '-18% Salud', type: 'negative' },
-      { effect: '-15% Humedad (grietas en el suelo)', type: 'negative' },
+      { effect: 'Grietas en el suelo', type: 'negative' },
       { effect: 'Solución: airear el suelo y regar', type: 'neutral' }
     ],
     tornado: [
-      { effect: '-30% Salud', type: 'negative' },
-      { effect: 'Reduce la altura un 30%', type: 'negative' },
       { effect: 'Solución: poda y fertilización', type: 'neutral' }
     ],
     inundacion: [
       { effect: '+100% Humedad (saturación)', type: 'negative' },
-      { effect: '-20% Salud por asfixia radicular', type: 'negative' },
+      { effect: 'Asfixia radicular', type: 'negative' },
       { effect: 'Solución: aireación del suelo', type: 'neutral' }
     ],
     nevada: [
-      { effect: '-18% Salud', type: 'negative' },
       { effect: 'Peso de la nieve sobre las plantas', type: 'negative' },
       { effect: 'Solución: poda y tratamientos', type: 'neutral' }
     ],
     rayo_caido: [
-      { effect: '-15% Salud', type: 'negative' },
       { effect: 'Daño puntual por descarga', type: 'negative' },
       { effect: 'Solución: poda de zonas afectadas', type: 'neutral' }
     ],
     incendio_proximo: [
-      { effect: '-25% Salud', type: 'negative' },
-      { effect: '-25% Humedad por calor extremo', type: 'negative' },
       { effect: 'Solución: riego abundante y compostaje', type: 'neutral' }
     ],
     niebla_persistente: [
-      { effect: '-5% Salud (menos fotosíntesis)', type: 'negative' },
+      { effect: 'Menos fotosíntesis', type: 'negative' },
       { effect: 'Favorece hongos', type: 'negative' }
     ],
     polvo_sahariano: [
-      { effect: '-7% Salud', type: 'negative' },
       { effect: 'Polvo cubre las hojas', type: 'negative' },
       { effect: 'Solución: riego por aspersión', type: 'neutral' }
     ],
     lluvia_acida: [
-      { effect: '-10% Salud', type: 'negative' },
       { effect: 'Acidifica el suelo', type: 'negative' },
       { effect: 'Solución: enmienda cálcica', type: 'neutral' }
     ],
 
     // === Problemas del suelo ===
     erosion_suelo: [
-      { effect: '-10% Salud', type: 'negative' },
       { effect: 'Se pierde capa fértil', type: 'negative' },
       { effect: 'Solución: compostaje o mulching', type: 'neutral' }
     ],
     salinizacion: [
-      { effect: '-12% Salud', type: 'negative' },
-      { effect: '-10% Humedad útil', type: 'negative' },
       { effect: 'Solución: riegos de lavado + enmienda', type: 'neutral' }
     ],
     acidificacion_suelo: [
-      { effect: '-10% Salud', type: 'negative' },
       { effect: 'pH demasiado bajo', type: 'negative' },
       { effect: 'Solución: enmienda cálcica', type: 'neutral' }
     ],
 
     // === Plagas y enfermedades específicas ===
     roya: [
-      { effect: '-7 a -28% Salud según intensidad', type: 'negative' },
       { effect: 'Hongo que se propaga rápido', type: 'negative' },
       { effect: 'Solución: tratamiento fitosanitario', type: 'neutral' }
     ],
     mildiu: [
-      { effect: '-7 a -28% Salud según intensidad', type: 'negative' },
       { effect: 'Hongo favorecido por humedad', type: 'negative' },
       { effect: 'Solución: tratamiento fitosanitario', type: 'neutral' }
     ],
     oidio: [
-      { effect: '-7 a -28% Salud según intensidad', type: 'negative' },
       { effect: 'Polvo blanco sobre las hojas', type: 'negative' },
       { effect: 'Solución: tratamiento fitosanitario', type: 'neutral' }
     ],
     virus_mosaico: [
-      { effect: '-8 a -32% Salud según intensidad', type: 'negative' },
       { effect: 'Sin cura: solo se mitiga', type: 'negative' },
       { effect: 'Solución: tratamiento + control biológico', type: 'neutral' }
     ],
     pulgones: [
-      { effect: '-6 a -22% Salud según intensidad', type: 'negative' },
       { effect: 'Chupan savia de los brotes', type: 'negative' },
       { effect: 'Solución: control biológico (mariquitas)', type: 'neutral' }
     ],
     arana_roja: [
-      { effect: '-6 a -22% Salud según intensidad', type: 'negative' },
       { effect: 'Aparece en ambientes secos', type: 'negative' },
       { effect: 'Solución: tratamiento + riego', type: 'neutral' }
     ],
     caracoles: [
-      { effect: '-8% Salud', type: 'negative' },
       { effect: 'Devoran hojas tiernas', type: 'negative' },
       { effect: 'Solución: control biológico', type: 'neutral' }
     ],
     nematodos: [
-      { effect: '-15% Salud', type: 'negative' },
       { effect: 'Atacan las raíces', type: 'negative' },
       { effect: 'Solución: tratamiento fitosanitario', type: 'neutral' }
     ],
     aves_plaga: [
-      { effect: '-8% Salud', type: 'negative' },
       { effect: 'Picotean frutos y semillas', type: 'negative' },
       { effect: 'Solución: instalar mallas', type: 'neutral' }
     ],
     jabalies: [
-      { effect: '-22% Salud', type: 'negative' },
-      { effect: 'Reducen la altura del cultivo', type: 'negative' },
       { effect: 'Solución: instalar vallado/mallas', type: 'neutral' }
     ],
     langostas: [
-      { effect: '-15 a -45% Salud según intensidad', type: 'negative' },
       { effect: 'Devastación masiva', type: 'negative' },
       { effect: 'Solución: tratamiento urgente', type: 'neutral' }
     ],
 
     // === Eventos técnicos / subrealistas ===
     apagon_riego: [
-      { effect: '-25% Humedad', type: 'negative' },
       { effect: 'El riego automático falla', type: 'negative' },
       { effect: 'Solución: riego manual', type: 'neutral' }
     ],
     contaminacion_quimica: [
-      { effect: '-22% Salud', type: 'negative' },
       { effect: 'Vertido tóxico cercano', type: 'negative' },
       { effect: 'Solución: compostaje + fertilización', type: 'neutral' }
     ],
     marabunta_hormigas: [
-      { effect: '-9% Salud', type: 'negative' },
       { effect: 'Excavan raíces y traen pulgones', type: 'negative' },
       { effect: 'Solución: tratamiento o control biológico', type: 'neutral' }
     ],
     ola_radiacion_uv: [
-      { effect: '-8% Salud', type: 'negative' },
       { effect: 'Quema de hojas por UV anómalo', type: 'negative' },
       { effect: 'Solución: mallas de sombreo + riego', type: 'neutral' }
     ],
@@ -305,9 +358,6 @@ const getEventEffects = (tipoEvento: string, intensidad?: string): { effect: str
       { effect: 'Útil tras inundación o compactación', type: 'positive' },
       { effect: 'Coste: €45/ha', type: 'neutral' }
     ]
-  };
-
-  return effects[tipoEvento] || [{ effect: 'Efectos desconocidos', type: 'neutral' }];
 };
 
 const getIntensityColor = (intensidad?: string): string => {

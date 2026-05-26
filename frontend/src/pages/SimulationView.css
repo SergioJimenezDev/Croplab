@@ -1178,26 +1178,32 @@
 .sim-v2-stats {
   position: absolute;
   top: 5.5rem;
-  left: 1.5rem;
-  right: 1.5rem;
+  left: 1rem;
+  bottom: 6rem;       /* deja hueco al settings-dock inferior izquierdo */
   z-index: 9;
   display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.55rem;
   pointer-events: none;
+  /* Si el viewport es muy bajo y las 6 stats no caben, dejamos scroll vertical
+     interno en lugar de que se salgan del viewport. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
 }
 
 .sim-v2-stat {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.65rem;
   padding: 0.55rem 0.9rem;
   border-radius: 14px;
   background: rgba(20,30,40,0.55);
   backdrop-filter: blur(18px);
   border: 1px solid rgba(255,255,255,0.18);
-  min-width: 130px;
+  width: 200px;        /* fijo en vertical para que todas tengan el mismo ancho */
+  flex: 0 0 auto;
   box-shadow: 0 6px 20px rgba(0,0,0,0.25);
 }
 
@@ -1326,10 +1332,13 @@
   gap: 0.45rem;
   transition: right 0.32s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s, transform 0.18s;
 }
-.sim-v2-panel-fullscreen:not(.exit) { right: calc(380px + 8px); }
+/* Posicionamos a la izquierda del botón toggle (36px de ancho), con un gap de 8px.
+   Antes el offset era solo 8px y el fullscreen se solapaba con el lado izquierdo
+   del toggle (z-index 12 > 11), tapándolo "un poco" al abrir el panel. */
+.sim-v2-panel-fullscreen:not(.exit) { right: calc(380px + 36px + 8px); }
 .sim-v2-panel-fullscreen:hover { background: rgba(45,65,85,0.9); }
 @media (max-width: 600px) {
-  .sim-v2-panel-fullscreen:not(.exit) { right: calc(92vw + 8px); }
+  .sim-v2-panel-fullscreen:not(.exit) { right: calc(92vw + 36px + 8px); }
 }
 
 /* En modo fullscreen → botón rojo grande, prominente, arriba derecha */
@@ -1523,6 +1532,45 @@
   color: #2e7d32 !important;
 }
 
+/* --- Animación de "tachado" cuando se resuelve un evento activo ---
+   El evento se mantiene visible ~2 s con una línea que cruza el nombre + un fade
+   suave, para que el usuario perciba claramente que el problema se ha resuelto. */
+.sim-v2-side-content .sim-v2-activo-resuelto {
+  border-left-color: #2e7d32;
+  background: #f3f9f4;
+  border-color: #cfe6d2;
+  animation: simV2ActivoResueltoFade 2s ease-out forwards;
+  overflow: hidden;
+}
+.sim-v2-side-content .sim-v2-activo-resuelto .sim-v2-activo-titulo strong {
+  position: relative;
+  display: inline-block;
+}
+.sim-v2-side-content .sim-v2-activo-resuelto .sim-v2-activo-titulo strong::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  width: 0;
+  height: 2px;
+  background: #c62828;
+  transform: translateY(-50%) rotate(-1deg);
+  animation: simV2Strike 0.55s 0.05s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.sim-v2-side-content .sim-v2-activo-resuelto .sim-v2-activo-titulo small {
+  color: #2e7d32 !important;
+  font-weight: 600;
+}
+@keyframes simV2Strike {
+  to { width: calc(100% + 6px); }
+}
+@keyframes simV2ActivoResueltoFade {
+  0%   { opacity: 1; transform: translateX(0);     max-height: 200px; margin-bottom: 0.55rem; }
+  70%  { opacity: 1; transform: translateX(0);     max-height: 200px; margin-bottom: 0.55rem; }
+  100% { opacity: 0; transform: translateX(16px);  max-height: 0;     margin-bottom: 0;
+         padding-top: 0; padding-bottom: 0; border-width: 0; }
+}
+
 /* --- Pestaña Economía / Presupuesto: títulos en negro --- */
 .sim-v2-side-content .economy-panel h3,
 .sim-v2-side-content .economy-panel h4,
@@ -1693,6 +1741,15 @@
   box-shadow: 0 0 16px rgba(155, 180, 255, 0.35);
 }
 .sim-v2-toggle.off { background: rgba(40,50,60,0.7); border-color: rgba(255,255,255,0.15); }
+/* Botón de Personalización en el dock — estilo neutral con acento sutil */
+.sim-v2-toggle.sim-v2-perso-btn {
+  background: rgba(38, 52, 70, 0.85);
+  border-color: rgba(180, 200, 230, 0.28);
+}
+.sim-v2-toggle.sim-v2-perso-btn:hover:not(:disabled) {
+  background: rgba(58, 78, 105, 0.92);
+  border-color: rgba(180, 200, 230, 0.45);
+}
 .sim-v2-toggle-icon { font-size: 1.15rem; line-height: 1; }
 .sim-v2-toggle-text { font-weight: 500; letter-spacing: 0.02em; }
 .sim-v2-toggle-text strong { font-weight: 700; letter-spacing: 0.05em; margin-left: 0.25rem; }
@@ -1720,6 +1777,265 @@
 }
 .sim-v2-finish-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+/* ============================================================
+   Panel modal de PERSONALIZACIÓN
+   ============================================================ */
+.sim-v2-perso-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 14, 22, 0.62);
+  backdrop-filter: blur(6px);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: persoFadeIn 0.18s ease-out;
+}
+@keyframes persoFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sim-v2-perso-panel {
+  width: min(680px, 100%);
+  max-height: 88vh;
+  background: linear-gradient(180deg, rgba(20, 30, 42, 0.95), rgba(14, 22, 32, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  color: #f6f8fa;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: persoSlideUp 0.22s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+@keyframes persoSlideUp {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sim-v2-perso-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.4rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sim-v2-perso-header h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.sim-v2-perso-close {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f6f8fa;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sim-v2-perso-close:hover { background: rgba(255, 255, 255, 0.14); }
+.sim-v2-perso-body {
+  padding: 1.1rem 1.4rem 1.4rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+.sim-v2-perso-section h4 {
+  margin: 0 0 0.7rem;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 600;
+}
+.sim-v2-perso-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.55rem;
+}
+.sim-v2-perso-section-head h4 { margin: 0; }
+
+/* Modos de juego (eventos aleatorios + invencible) */
+.sim-v2-perso-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.sim-v2-perso-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(30, 42, 56, 0.7);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+.sim-v2-perso-toggle:hover { background: rgba(40, 55, 72, 0.85); transform: translateY(-1px); }
+.sim-v2-perso-toggle.on { background: rgba(95, 174, 69, 0.30); border-color: rgba(95, 174, 69, 0.55); }
+.sim-v2-perso-toggle.on.invencible {
+  background: rgba(98, 135, 230, 0.30);
+  border-color: rgba(155, 180, 255, 0.6);
+}
+.sim-v2-perso-toggle-icon { font-size: 1.6rem; line-height: 1; }
+.sim-v2-perso-toggle-body { flex: 1; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.sim-v2-perso-toggle-body strong { font-weight: 600; font-size: 0.95rem; }
+.sim-v2-perso-toggle-body small {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.70);
+  font-weight: 400;
+  line-height: 1.3;
+}
+.sim-v2-perso-pill {
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+}
+.sim-v2-perso-pill.on { background: rgba(95, 174, 69, 0.6); border-color: rgba(140, 220, 100, 0.7); }
+.sim-v2-perso-pill.invencible { background: rgba(98, 135, 230, 0.6); border-color: rgba(155, 180, 255, 0.7); }
+
+/* Badge del modo actual ("Todos" / "Modo realista" / "Personalizado") */
+.sim-v2-perso-mode-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+.sim-v2-perso-mode-badge.mode-todos { background: rgba(98, 135, 230, 0.45); border-color: rgba(155, 180, 255, 0.65); }
+.sim-v2-perso-mode-badge.mode-modo-realista { background: rgba(95, 174, 69, 0.45); border-color: rgba(140, 220, 100, 0.65); }
+.sim-v2-perso-mode-badge.mode-personalizado { background: rgba(229, 161, 53, 0.45); border-color: rgba(255, 200, 100, 0.65); }
+
+.sim-v2-perso-hint {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.7);
+  line-height: 1.45;
+  margin: 0 0 0.85rem;
+}
+
+.sim-v2-perso-presets {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+}
+.sim-v2-perso-preset {
+  padding: 0.45rem 0.95rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.sim-v2-perso-preset:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(-1px); }
+.sim-v2-perso-preset.active {
+  background: rgba(95, 174, 69, 0.5);
+  border-color: rgba(140, 220, 100, 0.7);
+}
+
+.sim-v2-perso-warning {
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.85rem;
+  border-radius: 10px;
+  background: rgba(229, 161, 53, 0.15);
+  border: 1px solid rgba(229, 161, 53, 0.45);
+  font-size: 0.82rem;
+  color: #ffdfa3;
+}
+.sim-v2-perso-warning em { font-style: normal; font-weight: 700; }
+
+/* Lista categorizada de eventos */
+.sim-v2-perso-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.sim-v2-perso-cat h5 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.sim-v2-perso-events {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.4rem;
+}
+.sim-v2-perso-event {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  font-size: 0.85rem;
+  min-width: 0;       /* permite que los hijos flex puedan encogerse */
+  overflow: hidden;   /* protege contra cualquier desbordamiento residual */
+}
+.sim-v2-perso-event:hover { background: rgba(255, 255, 255, 0.09); }
+.sim-v2-perso-event.checked {
+  background: rgba(95, 174, 69, 0.18);
+  border-color: rgba(95, 174, 69, 0.55);
+}
+.sim-v2-perso-event input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: #5fae45;
+  cursor: pointer;
+}
+.sim-v2-perso-event-icon { font-size: 1rem; flex-shrink: 0; }
+.sim-v2-perso-event-name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sim-v2-perso-event-tag {
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.08rem 0.35rem;
+  border-radius: 4px;
+  background: rgba(95, 174, 69, 0.35);
+  border: 1px solid rgba(95, 174, 69, 0.55);
+  color: #d4f0c5;
+}
+
+@media (max-width: 600px) {
+  .sim-v2-perso-modes { grid-template-columns: 1fr; }
+  .sim-v2-perso-events { grid-template-columns: 1fr; }
+}
+
 /* Detalles dentro del side panel */
 .sim-v2-details .scientific-name { font-style: italic; opacity: 0.75; font-size: 0.85rem; margin: 0; }
 .sim-v2-details .description { opacity: 0.85; margin: 0.4rem 0 0.8rem; }
@@ -1727,14 +2043,14 @@
 
 /* Responsive */
 @media (max-width: 900px) {
-  .sim-v2-stats { left: 0.75rem; right: 0.75rem; top: 5rem; }
-  .sim-v2-stat { min-width: 110px; padding: 0.45rem 0.65rem; }
+  .sim-v2-stats { left: 0.75rem; top: 5rem; bottom: 5.5rem; }
+  .sim-v2-stat { width: 170px; padding: 0.45rem 0.65rem; }
   .sim-v2-side-content { width: 320px; }
   .sim-v2-title h1 { font-size: 1.05rem; }
 }
 @media (max-width: 600px) {
   .sim-v2-stats { gap: 0.4rem; }
-  .sim-v2-stat { min-width: 95px; }
+  .sim-v2-stat { width: 150px; }
   .sim-v2-quick { width: 70px; }
   .sim-v2-time-primary { font-size: 0.9rem; padding: 0.55rem 1rem; }
   .sim-v2-rand span:not(:first-child) { display: none; }

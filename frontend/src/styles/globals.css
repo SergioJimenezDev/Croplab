@@ -102,18 +102,17 @@
 }
 
 html, body {
-  height: 100%;
+  min-height: 100vh;
   font-family: var(--font-family-base);
   font-size: var(--font-size-md);
   line-height: 1.5;
   color: var(--text-primary);
-  background-color: var(--bg-secondary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
-  min-height: 100%;
+  min-height: 100vh;
 }
 
 /* ============================================================================

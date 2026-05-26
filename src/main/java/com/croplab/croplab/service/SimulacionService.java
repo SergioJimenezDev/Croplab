@@ -369,7 +369,28 @@ public class SimulacionService {
                 Evento.TipoEvento.marabunta_hormigas, Evento.TipoEvento.ola_radiacion_uv
         };
 
-        Evento.TipoEvento tipo = pool[random.nextInt(pool.length)];
+        // Aplicar el filtro de "eventos permitidos" si la simulación tiene uno
+        // configurado (Modo realista o personalización). El pool se reduce a las
+        // entradas cuyo nombre aparece en el set permitido. Si el filtro queda
+        // vacío (configuración inválida) usamos el pool completo como fallback.
+        Evento.TipoEvento[] poolFiltrado = pool;
+        String csv = simulacion.getEventosPermitidos();
+        if (csv != null && !csv.trim().isEmpty()) {
+            java.util.Set<String> permitidos = new java.util.HashSet<>();
+            for (String p : csv.split(",")) {
+                String t = p.trim();
+                if (!t.isEmpty()) permitidos.add(t);
+            }
+            java.util.List<Evento.TipoEvento> filtrados = new java.util.ArrayList<>();
+            for (Evento.TipoEvento te : pool) {
+                if (permitidos.contains(te.name())) filtrados.add(te);
+            }
+            if (!filtrados.isEmpty()) {
+                poolFiltrado = filtrados.toArray(new Evento.TipoEvento[0]);
+            }
+        }
+
+        Evento.TipoEvento tipo = poolFiltrado[random.nextInt(poolFiltrado.length)];
         evento.setTipoEvento(tipo);
         evento.setDescripcion(descripcionPorDefecto(tipo));
         evento.setIntensidad(intensidadPorDefecto(tipo));
@@ -424,9 +445,16 @@ public class SimulacionService {
         }
     }
 
+    /**
+     * Devuelve una intensidad ALEATORIA pero sesgada hacia la severidad "natural"
+     * del tipo. Antes este método devolvía siempre la misma intensidad para cada
+     * tipo, así que un terremoto del sistema siempre era "severo" — la intensidad
+     * existía como concepto pero nunca variaba. Ahora cada generación tira un dado
+     * dentro del rango plausible del tipo.
+     */
     private Evento.Intensidad intensidadPorDefecto(Evento.TipoEvento tipo) {
         switch (tipo) {
-            // Catástrofes graves
+            // Catástrofes: rondan entre severo y crítico, alguna vez moderado
             case terremoto:
             case tornado:
             case granizo:
@@ -436,9 +464,13 @@ public class SimulacionService {
             case jabalies:
             case virus_mosaico:
             case contaminacion_quimica:
-                return Evento.Intensidad.severo;
+                return ponderada(new Evento.Intensidad[]{
+                        Evento.Intensidad.moderado,
+                        Evento.Intensidad.severo, Evento.Intensidad.severo,
+                        Evento.Intensidad.critico
+                });
 
-            // Problemas medios
+            // Problemas medios: distribución equilibrada moderado/severo, raro crítico
             case sequia:
             case helada:
             case ola_calor:
@@ -455,9 +487,14 @@ public class SimulacionService {
             case acidificacion_suelo:
             case apagon_riego:
             case marabunta_hormigas:
-                return Evento.Intensidad.moderado;
+                return ponderada(new Evento.Intensidad[]{
+                        Evento.Intensidad.leve,
+                        Evento.Intensidad.moderado, Evento.Intensidad.moderado, Evento.Intensidad.moderado,
+                        Evento.Intensidad.severo, Evento.Intensidad.severo,
+                        Evento.Intensidad.critico
+                });
 
-            // Eventos leves
+            // Eventos leves: casi siempre leve/moderado, severo es excepcional
             case viento_fuerte:
             case lluvia_torrencial:
             case malas_hierbas:
@@ -467,11 +504,29 @@ public class SimulacionService {
             case caracoles:
             case aves_plaga:
             case ola_radiacion_uv:
-                return Evento.Intensidad.leve;
+                return ponderada(new Evento.Intensidad[]{
+                        Evento.Intensidad.leve, Evento.Intensidad.leve, Evento.Intensidad.leve,
+                        Evento.Intensidad.moderado, Evento.Intensidad.moderado,
+                        Evento.Intensidad.severo
+                });
+
+            // Plaga/enfermedad genéricas: cualquier intensidad es plausible
+            case plaga:
+            case enfermedad:
+                return ponderada(new Evento.Intensidad[]{
+                        Evento.Intensidad.leve,
+                        Evento.Intensidad.moderado, Evento.Intensidad.moderado,
+                        Evento.Intensidad.severo, Evento.Intensidad.severo,
+                        Evento.Intensidad.critico
+                });
 
             default:
-                return random.nextBoolean() ? Evento.Intensidad.moderado : Evento.Intensidad.severo;
+                return Evento.Intensidad.moderado;
         }
+    }
+
+    private Evento.Intensidad ponderada(Evento.Intensidad[] pool) {
+        return pool[random.nextInt(pool.length)];
     }
 
     @Transactional
@@ -564,7 +619,53 @@ public class SimulacionService {
         }
     }
 
+    /**
+     * Multiplicador aplicado al daño (o beneficio) base de un evento según su intensidad.
+     * Antes la intensidad sólo afectaba a 6-7 eventos hardcodeados; el resto ignoraba el
+     * campo y aplicaba siempre el mismo daño, lo que hacía que "leve" y "crítico" se
+     * sintieran idénticos en pantalla. Con este factor centralizado, cualquier evento
+     * negativo se escala de forma coherente.
+     */
+    private double factorIntensidad(Evento.Intensidad intensidad) {
+        if (intensidad == null) return 1.0;
+        switch (intensidad) {
+            case leve:     return 0.5;
+            case moderado: return 1.0;
+            case severo:   return 1.6;
+            case critico:  return 2.4;
+            default:       return 1.0;
+        }
+    }
+
+    /** Resta `delta * factor` a la salud, sin bajar de 0.
+     *  Si el modo invencible está activo, NO aplica ningún daño — los eventos
+     *  negativos manuales (que el usuario dispara desde el panel) seguían
+     *  bajando la vida porque este path saltaba la protección de invencible.
+     */
+    private void aplicarDanioSalud(Simulacion s, double delta, double factor) {
+        if (Boolean.TRUE.equals(s.getModoInvencible())) return;
+        BigDecimal nueva = s.getSaludActual().subtract(BigDecimal.valueOf(delta * factor));
+        s.setSaludActual(nueva.max(BigDecimal.ZERO));
+    }
+
+    /** Aplica un porcentaje de pérdida de altura (clamp por tope) sin reducirla si
+     *  el modo invencible está activo. Para eventos como tornado o jabalíes, que
+     *  además del daño en salud reducen la altura física de la planta.
+     */
+    private void aplicarPerdidaAltura(Simulacion s, double porcAltura) {
+        if (Boolean.TRUE.equals(s.getModoInvencible())) return;
+        BigDecimal a = s.getAlturaActual().multiply(BigDecimal.valueOf(1.0 - porcAltura));
+        s.setAlturaActual(a);
+    }
+
+    /** Resta `delta * factor` a la humedad del suelo, sin bajar de 0. */
+    private void aplicarDanioHumedad(Simulacion s, double delta, double factor) {
+        BigDecimal nueva = s.getHumedadSueloActual().subtract(BigDecimal.valueOf(delta * factor));
+        s.setHumedadSueloActual(nueva.max(BigDecimal.ZERO));
+    }
+
     private void aplicarEfectosEvento(Simulacion simulacion, Evento evento) {
+        final double f = factorIntensidad(evento.getIntensidad());
         switch (evento.getTipoEvento()) {
             case riego:
                 // Aumentar humedad del suelo significativamente
@@ -594,249 +695,141 @@ public class SimulacionService {
                 break;
 
             case plaga:
-                // Reducir salud MUCHO según intensidad
-                int reduccionPlaga = evento.getIntensidad() == Evento.Intensidad.critico ? 35 :
-                                    evento.getIntensidad() == Evento.Intensidad.severo ? 25 :
-                                    evento.getIntensidad() == Evento.Intensidad.moderado ? 15 : 8;
-                BigDecimal saludPlaga = simulacion.getSaludActual().subtract(BigDecimal.valueOf(reduccionPlaga));
-                simulacion.setSaludActual(saludPlaga.max(BigDecimal.ZERO));
+                // Daño base 18 (moderado) → leve 9, severo 29, crítico 43
+                aplicarDanioSalud(simulacion, 18, f);
                 break;
 
             case enfermedad:
-                // Reducir salud MUY SEVERAMENTE según intensidad
-                int reduccionEnfermedad = evento.getIntensidad() == Evento.Intensidad.critico ? 40 :
-                                         evento.getIntensidad() == Evento.Intensidad.severo ? 30 :
-                                         evento.getIntensidad() == Evento.Intensidad.moderado ? 18 : 10;
-                BigDecimal saludEnfermedad = simulacion.getSaludActual().subtract(BigDecimal.valueOf(reduccionEnfermedad));
-                simulacion.setSaludActual(saludEnfermedad.max(BigDecimal.ZERO));
+                // Daño base 22 (moderado) → leve 11, severo 35, crítico 53
+                aplicarDanioSalud(simulacion, 22, f);
                 break;
 
             case malas_hierbas:
-                // Reducir salud y nutrientes
-                BigDecimal saludMalasHierbas = simulacion.getSaludActual().subtract(BigDecimal.valueOf(8));
-                simulacion.setSaludActual(saludMalasHierbas.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 8, f);
                 break;
 
             case sequia:
-                // Reducir humedad DRÁSTICAMENTE
-                BigDecimal humedadSequia = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(45));
-                simulacion.setHumedadSueloActual(humedadSequia.max(BigDecimal.ZERO));
-                // También reduce salud
-                BigDecimal saludSequia = simulacion.getSaludActual().subtract(BigDecimal.valueOf(15));
-                simulacion.setSaludActual(saludSequia.max(BigDecimal.ZERO));
+                aplicarDanioHumedad(simulacion, 45, f);
+                aplicarDanioSalud(simulacion, 15, f);
                 break;
 
             case helada:
-                // Daño severo por frío
-                BigDecimal saludHelada = simulacion.getSaludActual().subtract(BigDecimal.valueOf(25));
-                simulacion.setSaludActual(saludHelada.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 25, f);
                 break;
 
             case ola_calor:
-                // Reducir humedad y salud
-                BigDecimal humedadCalor = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(30));
-                simulacion.setHumedadSueloActual(humedadCalor.max(BigDecimal.ZERO));
-                BigDecimal saludCalor = simulacion.getSaludActual().subtract(BigDecimal.valueOf(12));
-                simulacion.setSaludActual(saludCalor.max(BigDecimal.ZERO));
+                aplicarDanioHumedad(simulacion, 30, f);
+                aplicarDanioSalud(simulacion, 12, f);
                 break;
 
-            case lluvia_torrencial:
-                // Aumentar humedad al máximo pero puede dañar
+            case lluvia_torrencial: {
+                // La saturación al 100% siempre ocurre; lo que escala es el daño por exceso
                 simulacion.setHumedadSueloActual(BigDecimal.valueOf(100));
-                // Daño leve por exceso de agua
-                BigDecimal saludLluvia = simulacion.getSaludActual().subtract(BigDecimal.valueOf(5));
-                simulacion.setSaludActual(saludLluvia.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 5, f);
                 break;
+            }
 
             case granizo:
-                // Daño MUY severo por granizo
-                BigDecimal saludGranizo = simulacion.getSaludActual().subtract(BigDecimal.valueOf(35));
-                simulacion.setSaludActual(saludGranizo.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 22, f);
                 break;
 
             case viento_fuerte:
-                // Daño moderado
-                BigDecimal saludViento = simulacion.getSaludActual().subtract(BigDecimal.valueOf(10));
-                simulacion.setSaludActual(saludViento.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 10, f);
                 break;
 
             // ================= NUEVOS EVENTOS CATASTRÓFICOS =================
-            case terremoto: {
-                // Agrieta el suelo: pierde humedad y daña raíces
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(18));
-                BigDecimal h = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(15));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
-                simulacion.setHumedadSueloActual(h.max(BigDecimal.ZERO));
+            case terremoto:
+                aplicarDanioSalud(simulacion, 18, f);
+                aplicarDanioHumedad(simulacion, 15, f);
                 break;
-            }
             case tornado: {
-                // Daño físico severo: salud y altura
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(30));
-                BigDecimal a = simulacion.getAlturaActual().multiply(BigDecimal.valueOf(0.7));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
-                simulacion.setAlturaActual(a);
+                aplicarDanioSalud(simulacion, 30, f);
+                // El factor también acelera la pérdida de altura: leve poda un 15%,
+                // moderado un 30%, severo un 48%, crítico un 72% (con tope al 80%)
+                aplicarPerdidaAltura(simulacion, Math.min(0.80, 0.30 * f));
                 break;
             }
-            case inundacion: {
-                // Suelo saturado, raíces ahogadas
+            case inundacion:
                 simulacion.setHumedadSueloActual(BigDecimal.valueOf(100));
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(20));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+                aplicarDanioSalud(simulacion, 20, f);
                 break;
-            }
-            case nevada: {
-                // Frío + peso de la nieve
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(18));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case nevada:
+                aplicarDanioSalud(simulacion, 18, f);
                 break;
-            }
-            case rayo_caido: {
-                // Daño puntual fuerte
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(15));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case rayo_caido:
+                aplicarDanioSalud(simulacion, 15, f);
                 break;
-            }
-            case incendio_proximo: {
-                // Calor extremo + cenizas: reseca y daña
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(25));
-                BigDecimal h = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(25));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
-                simulacion.setHumedadSueloActual(h.max(BigDecimal.ZERO));
+            case incendio_proximo:
+                aplicarDanioSalud(simulacion, 25, f);
+                aplicarDanioHumedad(simulacion, 25, f);
                 break;
-            }
-            case niebla_persistente: {
-                // Reduce fotosíntesis: daño leve sostenido
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(5));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case niebla_persistente:
+                aplicarDanioSalud(simulacion, 5, f);
                 break;
-            }
-            case polvo_sahariano: {
-                // Polvo cubre hojas, reduce fotosíntesis
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(7));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case polvo_sahariano:
+                aplicarDanioSalud(simulacion, 7, f);
                 break;
-            }
-            case lluvia_acida: {
-                // Quema follaje y acidifica suelo
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(10));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case lluvia_acida:
+                aplicarDanioSalud(simulacion, 10, f);
                 break;
-            }
 
             // ================= PROBLEMAS DEL SUELO =================
-            case erosion_suelo: {
-                // Pérdida de capa fértil: daño nutricional + ligera salud
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(10));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case erosion_suelo:
+                aplicarDanioSalud(simulacion, 10, f);
                 break;
-            }
-            case salinizacion: {
-                // Sales bloquean absorción de agua
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(12));
-                BigDecimal h = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(10));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
-                simulacion.setHumedadSueloActual(h.max(BigDecimal.ZERO));
+            case salinizacion:
+                aplicarDanioSalud(simulacion, 12, f);
+                aplicarDanioHumedad(simulacion, 10, f);
                 break;
-            }
-            case acidificacion_suelo: {
-                // pH bajo limita absorción de nutrientes
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(10));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case acidificacion_suelo:
+                aplicarDanioSalud(simulacion, 10, f);
                 break;
-            }
 
             // ================= PLAGAS Y ENFERMEDADES ESPECÍFICAS =================
             case roya:
             case mildiu:
-            case oidio: {
-                // Hongos: similar a enfermedad, escala según intensidad
-                int red = evento.getIntensidad() == Evento.Intensidad.critico ? 28 :
-                          evento.getIntensidad() == Evento.Intensidad.severo ? 20 :
-                          evento.getIntensidad() == Evento.Intensidad.moderado ? 13 : 7;
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(red));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case oidio:
+                aplicarDanioSalud(simulacion, 14, f);
                 break;
-            }
-            case virus_mosaico: {
-                // Virus: daño fuerte y sostenido, sin cura inmediata (mitigable)
-                int red = evento.getIntensidad() == Evento.Intensidad.critico ? 32 :
-                          evento.getIntensidad() == Evento.Intensidad.severo ? 22 :
-                          evento.getIntensidad() == Evento.Intensidad.moderado ? 15 : 8;
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(red));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case virus_mosaico:
+                aplicarDanioSalud(simulacion, 16, f);
                 break;
-            }
             case pulgones:
-            case arana_roja: {
-                // Plagas chupadoras
-                int red = evento.getIntensidad() == Evento.Intensidad.critico ? 22 :
-                          evento.getIntensidad() == Evento.Intensidad.severo ? 16 :
-                          evento.getIntensidad() == Evento.Intensidad.moderado ? 10 : 6;
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(red));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case arana_roja:
+                aplicarDanioSalud(simulacion, 12, f);
                 break;
-            }
-            case caracoles: {
-                // Plaga lenta, daño moderado
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(8));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case caracoles:
+                aplicarDanioSalud(simulacion, 8, f);
                 break;
-            }
-            case nematodos: {
-                // Daño radicular
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(15));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case nematodos:
+                aplicarDanioSalud(simulacion, 15, f);
                 break;
-            }
-            case aves_plaga: {
-                // Picotean frutos
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(8));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case aves_plaga:
+                aplicarDanioSalud(simulacion, 8, f);
                 break;
-            }
             case jabalies: {
-                // Destrozan terreno y altura
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(22));
-                BigDecimal a = simulacion.getAlturaActual().multiply(BigDecimal.valueOf(0.85));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
-                simulacion.setAlturaActual(a);
+                aplicarDanioSalud(simulacion, 22, f);
+                // Daño físico que escala con intensidad (15% base, hasta 36% en crítico)
+                aplicarPerdidaAltura(simulacion, Math.min(0.50, 0.15 * f));
                 break;
             }
-            case langostas: {
-                // Devastador
-                int red = evento.getIntensidad() == Evento.Intensidad.critico ? 45 :
-                          evento.getIntensidad() == Evento.Intensidad.severo ? 35 :
-                          evento.getIntensidad() == Evento.Intensidad.moderado ? 25 : 15;
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(red));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case langostas:
+                aplicarDanioSalud(simulacion, 25, f);
                 break;
-            }
 
             // ================= EVENTOS TÉCNICOS / SUBREALISTAS =================
-            case apagon_riego: {
-                // El sistema de riego no funciona: se pierde humedad rápido
-                BigDecimal h = simulacion.getHumedadSueloActual().subtract(BigDecimal.valueOf(25));
-                simulacion.setHumedadSueloActual(h.max(BigDecimal.ZERO));
+            case apagon_riego:
+                aplicarDanioHumedad(simulacion, 25, f);
                 break;
-            }
-            case contaminacion_quimica: {
-                // Vertido tóxico cercano: daño severo
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(22));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case contaminacion_quimica:
+                aplicarDanioSalud(simulacion, 22, f);
                 break;
-            }
-            case marabunta_hormigas: {
-                // Hormigas excavan y favorecen pulgones
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(9));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case marabunta_hormigas:
+                aplicarDanioSalud(simulacion, 9, f);
                 break;
-            }
-            case ola_radiacion_uv: {
-                // Quemado de hojas por radiación UV anómala
-                BigDecimal s = simulacion.getSaludActual().subtract(BigDecimal.valueOf(8));
-                simulacion.setSaludActual(s.max(BigDecimal.ZERO));
+            case ola_radiacion_uv:
+                aplicarDanioSalud(simulacion, 8, f);
                 break;
-            }
 
             // ================= NUEVAS ACCIONES DE MANEJO (usuario) =================
             case mulching: {
@@ -1195,49 +1188,84 @@ public class SimulacionService {
         return simulacionRepository.save(simulacion);
     }
 
+    /**
+     * Establece la lista (CSV) de tipos de evento permitidos como aleatorios.
+     * Si la cadena es null, vacía o se le pasa "*" se interpreta como
+     * "todos los eventos permitidos" (= comportamiento por defecto).
+     */
+    @Transactional
+    public Simulacion setEventosPermitidos(Long simulacionId, String csv, Long userId) {
+        Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
+        if (csv == null || csv.trim().isEmpty() || "*".equals(csv.trim())) {
+            simulacion.setEventosPermitidos(null);
+        } else {
+            // Limpieza básica: quitar espacios y duplicados manteniendo orden.
+            String[] partes = csv.split(",");
+            java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<>();
+            for (String p : partes) {
+                String trimmed = p.trim();
+                if (!trimmed.isEmpty()) set.add(trimmed);
+            }
+            simulacion.setEventosPermitidos(String.join(",", set));
+        }
+        return simulacionRepository.save(simulacion);
+    }
+
     @Transactional
     public void eliminarSimulacion(Long simulacionId, Long userId) {
         Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
         simulacionRepository.delete(simulacion);
     }
 
+    /**
+     * Mapea cada tipo de evento del usuario a la categoría de gasto que se muestra
+     * en el panel de economía y el gráfico de pastel. Mantener alineado con las
+     * categorías inicializadas en obtenerEstadisticasEconomicas().
+     */
+    private String categoriaDeGasto(Evento.TipoEvento tipo) {
+        switch (tipo) {
+            case riego:
+                return "Riego";
+            case fertilizacion:
+                return "Fertilización";
+            case tratamiento_fitosanitario:
+            case control_biologico:
+                return "Tratamientos Fitosanitarios";
+            case poda:
+                return "Poda y Mantenimiento";
+            case mulching:
+            case compostaje:
+            case aireacion_suelo:
+            case enmienda_calcica:
+                return "Manejo del Suelo";
+            case instalacion_malla:
+                return "Infraestructura";
+            default:
+                return "Otros";
+        }
+    }
+
     public EstadisticasEconomicasDTO obtenerEstadisticasEconomicas(Long simulacionId, Long userId) {
         Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
         List<Evento> eventos = eventoRepository.findByIdSimulacionOrderByDiaEventoAsc(simulacionId);
 
-        // Agrupar gastos por categoría
-        Map<String, BigDecimal> gastosPorCategoria = new HashMap<>();
+        // Agrupar gastos por categoría. Mantenemos un orden de inserción estable
+        // para que el panel de economía pinte siempre las mismas etiquetas en el
+        // mismo orden, independientemente de qué acciones haya hecho el usuario.
+        Map<String, BigDecimal> gastosPorCategoria = new java.util.LinkedHashMap<>();
         gastosPorCategoria.put("Riego", BigDecimal.ZERO);
         gastosPorCategoria.put("Fertilización", BigDecimal.ZERO);
         gastosPorCategoria.put("Tratamientos Fitosanitarios", BigDecimal.ZERO);
         gastosPorCategoria.put("Poda y Mantenimiento", BigDecimal.ZERO);
+        gastosPorCategoria.put("Manejo del Suelo", BigDecimal.ZERO);
+        gastosPorCategoria.put("Infraestructura", BigDecimal.ZERO);
         gastosPorCategoria.put("Otros", BigDecimal.ZERO);
 
         for (Evento evento : eventos) {
-            if (evento.getCosteEuros() != null && evento.getCosteEuros().compareTo(BigDecimal.ZERO) > 0) {
-                switch (evento.getTipoEvento()) {
-                    case riego:
-                        gastosPorCategoria.put("Riego",
-                            gastosPorCategoria.get("Riego").add(evento.getCosteEuros()));
-                        break;
-                    case fertilizacion:
-                        gastosPorCategoria.put("Fertilización",
-                            gastosPorCategoria.get("Fertilización").add(evento.getCosteEuros()));
-                        break;
-                    case tratamiento_fitosanitario:
-                        gastosPorCategoria.put("Tratamientos Fitosanitarios",
-                            gastosPorCategoria.get("Tratamientos Fitosanitarios").add(evento.getCosteEuros()));
-                        break;
-                    case poda:
-                        gastosPorCategoria.put("Poda y Mantenimiento",
-                            gastosPorCategoria.get("Poda y Mantenimiento").add(evento.getCosteEuros()));
-                        break;
-                    default:
-                        gastosPorCategoria.put("Otros",
-                            gastosPorCategoria.get("Otros").add(evento.getCosteEuros()));
-                        break;
-                }
-            }
+            if (evento.getCosteEuros() == null || evento.getCosteEuros().compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            String categoria = categoriaDeGasto(evento.getTipoEvento());
+            gastosPorCategoria.merge(categoria, evento.getCosteEuros(), BigDecimal::add);
         }
 
         BigDecimal balance = simulacion.getPresupuestoActual()
