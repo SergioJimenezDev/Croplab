@@ -239,6 +239,21 @@ export const simulacionService = {
   },
 
   /**
+   * Activar o desactivar el dinero infinito (los eventos no descuentan presupuesto)
+   */
+  setDineroInfinito: async (id: number, activo: boolean): Promise<Simulacion> => {
+    try {
+      const response = await api.put<ApiResponse<Simulacion>>(
+        `/simulaciones/${id}/dinero-infinito?activo=${activo}`
+      );
+      if (response.success && response.data) return response.data;
+      throw new Error(response.message || 'Error al cambiar dinero infinito');
+    } catch (error: any) {
+      throw new Error(error.response?.data?.message || error.message || 'Error al cambiar dinero infinito');
+    }
+  },
+
+  /**
    * Activar o desactivar la generación aleatoria de eventos del sistema
    */
   setEventosAleatorios: async (id: number, activos: boolean): Promise<Simulacion> => {

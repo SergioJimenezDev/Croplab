@@ -56,29 +56,33 @@ interface EventoActivoInfo {
   nombre: string;
   acciones: TipoEvento[];   // tipos de evento del usuario que resuelven
   accionTexto: string;       // descripción legible para la UI
+  /** Si true, el evento permanece activo indefinidamente hasta que se aplique
+   *  la acción correctora. Los problemas fitosanitarios y bióticos NUNCA caducan
+   *  solos: si tienes pulgones, los seguirás teniendo hasta tratar. */
+  permanente?: boolean;
 }
 
 const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
-  // Plagas y enfermedades — necesitan tratamiento o control biológico
-  plaga: { emoji: '🐛', nombre: 'Plaga', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario o control biológico' },
-  enfermedad: { emoji: '🦠', nombre: 'Enfermedad', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario' },
-  roya: { emoji: '🍂', nombre: 'Roya (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario' },
-  mildiu: { emoji: '🍄', nombre: 'Mildiu (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario' },
-  oidio: { emoji: '⚪', nombre: 'Oídio (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario' },
-  virus_mosaico: { emoji: '🧬', nombre: 'Virus del mosaico', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Mitígalo con tratamiento + control biológico' },
-  pulgones: { emoji: '🐜', nombre: 'Pulgones', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Usa control biológico (mariquitas) o tratamiento' },
-  arana_roja: { emoji: '🕷️', nombre: 'Araña roja', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento + aumenta la humedad' },
-  caracoles: { emoji: '🐌', nombre: 'Caracoles', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico' },
-  nematodos: { emoji: '🪱', nombre: 'Nematodos', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario' },
-  langostas: { emoji: '🦗', nombre: 'Langostas', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento urgente' },
-  marabunta_hormigas: { emoji: '🐜', nombre: 'Marabunta de hormigas', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico' },
+  // Plagas y enfermedades — persisten hasta que se traten
+  plaga: { emoji: '🐛', nombre: 'Plaga', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario o control biológico', permanente: true },
+  enfermedad: { emoji: '🦠', nombre: 'Enfermedad', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
+  roya: { emoji: '🍂', nombre: 'Roya (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
+  mildiu: { emoji: '🍄', nombre: 'Mildiu (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
+  oidio: { emoji: '⚪', nombre: 'Oídio (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
+  virus_mosaico: { emoji: '🧬', nombre: 'Virus del mosaico', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Mitígalo con tratamiento + control biológico', permanente: true },
+  pulgones: { emoji: '🐜', nombre: 'Pulgones', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Usa control biológico (mariquitas) o tratamiento', permanente: true },
+  arana_roja: { emoji: '🕷️', nombre: 'Araña roja', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento + aumenta la humedad', permanente: true },
+  caracoles: { emoji: '🐌', nombre: 'Caracoles', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico', permanente: true },
+  nematodos: { emoji: '🪱', nombre: 'Nematodos', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
+  langostas: { emoji: '🦗', nombre: 'Langostas', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento urgente', permanente: true },
+  marabunta_hormigas: { emoji: '🐜', nombre: 'Marabunta de hormigas', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico', permanente: true },
 
-  // Fauna grande — necesita barrera
-  aves_plaga: { emoji: '🐦', nombre: 'Bandadas de aves', acciones: ['instalacion_malla'], accionTexto: 'Instala mallas antipájaros' },
-  jabalies: { emoji: '🐗', nombre: 'Jabalíes', acciones: ['instalacion_malla'], accionTexto: 'Instala vallado/mallas' },
+  // Fauna grande — persiste hasta instalar barrera
+  aves_plaga: { emoji: '🐦', nombre: 'Bandadas de aves', acciones: ['instalacion_malla'], accionTexto: 'Instala mallas antipájaros', permanente: true },
+  jabalies: { emoji: '🐗', nombre: 'Jabalíes', acciones: ['instalacion_malla'], accionTexto: 'Instala vallado/mallas', permanente: true },
 
-  // Malas hierbas
-  malas_hierbas: { emoji: '🌾', nombre: 'Malas hierbas', acciones: ['poda', 'mulching'], accionTexto: 'Pasa la azada (poda) o aplica mulching' },
+  // Malas hierbas — persisten hasta limpiar
+  malas_hierbas: { emoji: '🌾', nombre: 'Malas hierbas', acciones: ['poda', 'mulching'], accionTexto: 'Pasa la azada (poda) o aplica mulching', permanente: true },
 
   // Problemas de suelo persistentes
   salinizacion: { emoji: '🧂', nombre: 'Salinización del suelo', acciones: ['riego', 'enmienda_calcica'], accionTexto: 'Riegos abundantes de lavado + enmienda cálcica' },
@@ -94,7 +98,11 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   lluvia_acida: { emoji: '☢️', nombre: 'Lluvia ácida', acciones: ['enmienda_calcica', 'riego'], accionTexto: 'Aplica enmienda cálcica y riega para lavar las hojas' },
   sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego'], accionTexto: 'Riega abundantemente' },
   ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching'], accionTexto: 'Riega y considera mulching para retener humedad' },
-  ola_radiacion_uv: { emoji: '🛸', nombre: 'Radiación UV alta', acciones: ['instalacion_malla', 'riego'], accionTexto: 'Instala malla de sombreo y riega' },
+  // El OVNI sólo se va con el cañón anti-OVNI. acciones=[] para que ningún
+  // riego ni malla lo resuelva por el flujo normal; la "resolución" se hace
+  // localmente añadiendo el idEvento al set ovnisDerribadosIds (persistido en
+  // localStorage) y filtrándolo en eventosActivosMemo.
+  ola_radiacion_uv: { emoji: '🛸', nombre: 'Radiación UV alta', acciones: [], accionTexto: '¡Saca el cañón anti-OVNI y derríbalo!' },
 
   // Técnicos persistentes
   apagon_riego: { emoji: '🔌', nombre: 'Apagón del sistema de riego', acciones: ['riego'], accionTexto: 'Riega manualmente hasta que se restaure el sistema' }
@@ -131,17 +139,27 @@ const calcularEventosActivos = (eventos: Evento[], diaActual: number): EventoAct
   eventos.forEach(ev => {
     const info = EVENTOS_PERSISTENTES[ev.tipoEvento];
     if (!info) return;
-    if (ev.diaEvento < diaActual - VENTANA_DIAS_ACTIVO) return;
+    // Los eventos `permanente` (problemas fitosanitarios, fauna, malas hierbas)
+    // siguen activos hasta que se apliquen sus acciones correctoras —
+    // saltamos el cribado por ventana de días para ellos.
+    if (!info.permanente && ev.diaEvento < diaActual - VENTANA_DIAS_ACTIVO) return;
     masRecientePorTipo.set(ev.tipoEvento, ev);
   });
   masRecientePorTipo.forEach((ev) => {
     const info = EVENTOS_PERSISTENTES[ev.tipoEvento]!;
-    // ¿Hay alguna acción del usuario después del evento que lo resuelva?
+    // ¿Hay alguna acción del usuario DESPUÉS del evento que lo resuelva?
+    // En el mismo día, usamos idEvento (secuencial en backend) como desempate,
+    // si no, una acción podría "resolver" un evento futuro invocado más tarde
+    // ese mismo día (caso del cañón anti-OVNI re-invocado en el mismo día).
+    const evId = ev.idEvento ?? 0;
     const resuelto = eventos.some(e =>
       e.origen === 'usuario' &&
-      e.diaEvento >= ev.diaEvento &&
       e.diaEvento <= diaActual &&
-      info.acciones.includes(e.tipoEvento)
+      info.acciones.includes(e.tipoEvento) &&
+      (
+        e.diaEvento > ev.diaEvento ||
+        (e.diaEvento === ev.diaEvento && (e.idEvento ?? 0) > evId)
+      )
     );
     if (!resuelto) activos.push({ evento: ev, info });
   });
@@ -279,6 +297,34 @@ const SimulationView: React.FC = () => {
   const [showEventModal, setShowEventModal] = useState(false);
   const [modalClosing, setModalClosing] = useState(false);
   const [personalizacionAbierta, setPersonalizacionAbierta] = useState(false);
+  // Eventos de destrucción total — vivían en un modal aparte pero ahora se
+  // disparan desde una sección dentro del propio panel de personalización.
+  type EventoDestructivo = 'meteorito' | 'bomba_nuclear' | 'zombies';
+  const [destruccionAplicando, setDestruccionAplicando] = useState(false);
+
+  // OVNIs derribados localmente (no se persiste en backend). Cada vez que el
+  // jugador acaba con un OVNI a tiros, guardamos el idEvento del evento UV
+  // para excluirlo de eventosActivosMemo. localStorage por id de simulación
+  // para que sobreviva a recargas. Cuando aparezca un OVNI NUEVO tendrá un
+  // idEvento distinto y volverá a salir activo (y el cañón disponible).
+  const ovnisStorageKey = id ? `croplab_ovnis_derribados_${id}` : null;
+  const [ovnisDerribadosIds, setOvnisDerribadosIds] = useState<Set<number>>(() => {
+    if (!ovnisStorageKey) return new Set();
+    try {
+      const raw = window.localStorage.getItem(ovnisStorageKey);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw) as number[];
+      return new Set(arr);
+    } catch {
+      return new Set();
+    }
+  });
+  useEffect(() => {
+    if (!ovnisStorageKey) return;
+    try {
+      window.localStorage.setItem(ovnisStorageKey, JSON.stringify(Array.from(ovnisDerribadosIds)));
+    } catch { /* quota / privacy mode → ignorar */ }
+  }, [ovnisDerribadosIds, ovnisStorageKey]);
 
   // Cierra el modal con animación de salida (~280 ms)
   const closeEventModal = () => {
@@ -311,8 +357,10 @@ const SimulationView: React.FC = () => {
   // IMPORTANTE: estos hooks tienen que estar antes de cualquier early-return
   // (los hooks deben llamarse en el mismo orden en cada render).
   const eventosActivosMemo = React.useMemo(
-    () => calcularEventosActivos(eventos, simulacion?.diaActual ?? 0),
-    [eventos, simulacion?.diaActual]
+    () => calcularEventosActivos(eventos, simulacion?.diaActual ?? 0)
+      // Excluimos OVNIs que el jugador ya derribó con el cañón (resolución local).
+      .filter(({ evento }) => evento.idEvento == null || !ovnisDerribadosIds.has(evento.idEvento)),
+    [eventos, simulacion?.diaActual, ovnisDerribadosIds]
   );
   const baseVFXMemo: VFXEffect | null = React.useMemo(() => {
     if (eventosActivosMemo.length === 0) return null;
@@ -482,6 +530,61 @@ const SimulationView: React.FC = () => {
     }
   };
 
+  // ============================================================
+  // Eventos de DESTRUCCIÓN TOTAL — disparo manual desde modal aparte.
+  // El backend pone saludActual=0 y estado=fallida. Aquí mostramos un flash
+  // VFX largo correspondiente para que la animación 3D se vea por completo.
+  // ============================================================
+  const aplicarDestruccion = async (tipo: EventoDestructivo) => {
+    if (!id) return;
+    if (destruccionAplicando) return;
+    setDestruccionAplicando(true);
+    try {
+      await simulacionService.aplicarEvento(parseInt(id), {
+        tipoEvento: tipo,
+        diaEvento: simulacion?.diaActual || 1,
+        origen: 'usuario' as OrigenEvento,
+        intensidad: 'critico'
+      });
+      await loadSimulationData();
+      // Cerramos el panel de personalización para que el VFX se vea sin estorbo.
+      setPersonalizacionAbierta(false);
+      setFlashVFX(tipo as VFXEffect);
+    } catch (error: any) {
+      alert(error.message || 'Error al aplicar destrucción');
+    } finally {
+      setDestruccionAplicando(false);
+    }
+  };
+
+  // ============================================================
+  // Derribar OVNI 🎯 — coreografía visual del cañón anti-OVNI.
+  // Resolución 100% local: no se manda nada al backend (sin coste, sin malla,
+  // sin riego). Marcamos el idEvento del UV activo como "derribado" y queda
+  // excluido de eventosActivosMemo. Cada nuevo OVNI invocado vendrá con un
+  // idEvento distinto y volverá a ser derribable.
+  // ============================================================
+  const [derribandoOvni, setDerribandoOvni] = useState(false);
+  const derribarOvni = () => {
+    if (derribandoOvni) return;
+    setDerribandoOvni(true);
+    setFlashVFX('derribar_ovni' as VFXEffect);
+    // Marca todos los OVNIs activos ahora mismo como derribados (lo normal es
+    // que haya uno solo; si por algún motivo hubiera varios, caen todos a la vez).
+    const ovnisActivos = eventosActivosMemo
+      .filter(({ evento }) => evento.tipoEvento === 'ola_radiacion_uv' && evento.idEvento != null)
+      .map(({ evento }) => evento.idEvento as number);
+    if (ovnisActivos.length > 0) {
+      setOvnisDerribadosIds(prev => {
+        const next = new Set(prev);
+        ovnisActivos.forEach(id => next.add(id));
+        return next;
+      });
+    }
+    // Pequeño debounce para evitar dobles clics durante la animación
+    window.setTimeout(() => setDerribandoOvni(false), 1200);
+  };
+
   const aplicarEvento = async () => {
     if (!id || !nuevoEvento.tipoEvento) return;
 
@@ -568,6 +671,17 @@ const SimulationView: React.FC = () => {
     }
   };
 
+  const toggleDineroInfinito = async () => {
+    if (!id || !simulacion) return;
+    const nuevoValor = !(simulacion.dineroInfinito ?? false);
+    try {
+      const actualizada = await simulacionService.setDineroInfinito(parseInt(id), nuevoValor);
+      setSimulacion(actualizada);
+    } catch (error: any) {
+      alert(error.message || 'Error al cambiar dinero infinito');
+    }
+  };
+
   // ============================================================
   // PERSONALIZACIÓN: eventos permitidos
   // ============================================================
@@ -649,6 +763,7 @@ const SimulationView: React.FC = () => {
 
   const eventosAleatoriosOn = simulacion.eventosAleatorios ?? true;
   const modoInvencibleOn = simulacion.modoInvencible ?? false;
+  const dineroInfinitoOn = simulacion.dineroInfinito ?? false;
   const ultimoEstado = historial.length > 0 ? historial[historial.length - 1] : null;
   const saludColor = simulacion.saludActual > 80 ? '#5fae45' : simulacion.saludActual > 50 ? '#ffa726' : '#e53935';
 
@@ -664,14 +779,37 @@ const SimulationView: React.FC = () => {
   const FLASH_DURATIONS_MS: Partial<Record<string, number>> = {
     rayo_caido: 6000,
     terremoto: 5000,
-    inundacion: 5000
+    inundacion: 5000,
+    ola_radiacion_uv: 7000,
+    plaga: 5000,
+    pulgones: 5000,
+    arana_roja: 5000,
+    caracoles: 5000,
+    langostas: 5000,
+    marabunta_hormigas: 5000,
+    // Destrucción total — coreografías largas y muy llamativas
+    meteorito: 8000,
+    bomba_nuclear: 9000,
+    zombies: 9000,
+    // Acción visual ficticia (cañón anti-OVNI). El evento que se persiste sigue
+    // siendo 'instalacion_malla'; este flash es sólo la coreografía 3D.
+    derribar_ovni: 7000
   };
   const currentVFXDuration: number | null = flashVFX
     ? (FLASH_DURATIONS_MS[flashVFX] ?? 4000)
     : null;
 
+  // Clases extra del root según el VFX activo: screen-shake y flash de pantalla
+  // para los eventos de destrucción total. Se aplican mientras dura el flash
+  // (currentVFX coincide con el flash que acaba de dispararse).
+  const destructClass =
+    currentVFX === 'meteorito' ? 'sim-v2-shake-heavy sim-v2-flash-meteor' :
+    currentVFX === 'bomba_nuclear' ? 'sim-v2-shake-extreme sim-v2-flash-nuke' :
+    currentVFX === 'zombies' ? 'sim-v2-shake-light sim-v2-flash-zombies' :
+    '';
+
   return (
-    <div className={`sim-v2 ${sidePanelFullscreen ? 'sim-v2-fullscreen-active' : ''}`}>
+    <div className={`sim-v2 ${sidePanelFullscreen ? 'sim-v2-fullscreen-active' : ''} ${destructClass}`}>
       {/* Fondo 3D */}
       <div className="sim-v2-scene">
         <Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#cfe7ff', color: '#1c2421', fontFamily: 'var(--font-hand, sans-serif)', fontSize: '1.5rem' }}>Cargando escena…</div>}>
@@ -684,6 +822,11 @@ const SimulationView: React.FC = () => {
           />
         </Suspense>
       </div>
+
+      {/* Overlay de flash de pantalla para eventos destructivos — un div
+          a pantalla completa que parpadea blanco/rojo/verde según el evento.
+          La animación CSS hace el trabajo (ver .sim-v2-flash-*). */}
+      {destructClass && <div className="sim-v2-destruct-flash" aria-hidden />}
 
       {/* Header glass */}
       <header className="sim-v2-header">
@@ -1078,8 +1221,22 @@ const SimulationView: React.FC = () => {
         </div>
       </aside>
 
-      {/* Dock inferior-izquierda: personalización + finalizar */}
+      {/* Dock inferior-izquierda: personalización + finalizar.
+          El botón "Derribar OVNI" aparece encima sólo mientras el OVNI está
+          sobrevolando la parcela (evento ola_radiacion_uv activo). */}
       <div className="sim-v2-settings-dock">
+        {eventosActivosNow.some(({ evento }) => evento.tipoEvento === 'ola_radiacion_uv') && (
+          <button
+            type="button"
+            className="sim-v2-derribar-ovni-btn"
+            onClick={derribarOvni}
+            disabled={derribandoOvni || simulacion.estado !== 'en_curso'}
+            title="Saca un cañón anti-aéreo y derriba al OVNI a tiros"
+          >
+            🎯 {derribandoOvni ? 'Disparando...' : 'Derribar OVNI'}
+          </button>
+        )}
+
         <button
           type="button"
           className="sim-v2-toggle sim-v2-perso-btn"
@@ -1090,6 +1247,7 @@ const SimulationView: React.FC = () => {
           <span className="sim-v2-toggle-icon">⚙️</span>
           <span className="sim-v2-toggle-text">Personalización</span>
         </button>
+
 
         <button
           type="button"
@@ -1168,6 +1326,25 @@ const SimulationView: React.FC = () => {
                     </span>
                     <span className={`sim-v2-perso-pill ${modoInvencibleOn ? 'invencible' : 'off'}`}>
                       {modoInvencibleOn ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`sim-v2-perso-toggle ${dineroInfinitoOn ? 'on dinero' : 'off'}`}
+                    onClick={toggleDineroInfinito}
+                  >
+                    <span className="sim-v2-perso-toggle-icon">💰</span>
+                    <span className="sim-v2-perso-toggle-body">
+                      <strong>Dinero infinito</strong>
+                      <small>
+                        {dineroInfinitoOn
+                          ? 'Los eventos no descuentan presupuesto.'
+                          : 'Los eventos consumen tu presupuesto.'}
+                      </small>
+                    </span>
+                    <span className={`sim-v2-perso-pill ${dineroInfinitoOn ? 'dinero' : 'off'}`}>
+                      {dineroInfinitoOn ? 'ON' : 'OFF'}
                     </span>
                   </button>
                 </div>
@@ -1249,6 +1426,49 @@ const SimulationView: React.FC = () => {
                         </div>
                       </div>
                     ))}
+                </div>
+              </section>
+
+              {/* === Efectos de destrucción total === */}
+              <section className="sim-v2-perso-section sim-v2-perso-destruct">
+                <div className="sim-v2-perso-section-head">
+                  <h4>💀 Efectos de destrucción</h4>
+                </div>
+                <p className="sim-v2-perso-hint">
+                  Catástrofes irreales que <strong>aniquilan la planta al instante</strong>
+                  {' '}y marcan la simulación como fallida. No aparecen en el modo realista.
+                </p>
+                <div className="sim-v2-destruct-grid">
+                  <button
+                    type="button"
+                    className="sim-v2-destruct-card meteor"
+                    disabled={destruccionAplicando || simulacion.estado !== 'en_curso'}
+                    onClick={() => aplicarDestruccion('meteorito')}
+                  >
+                    <span className="sim-v2-destruct-icon">☄️</span>
+                    <span className="sim-v2-destruct-name">Meteoritos</span>
+                    <small>Lluvia de 10 rocas ardientes con sacudida sísmica.</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="sim-v2-destruct-card nuke"
+                    disabled={destruccionAplicando || simulacion.estado !== 'en_curso'}
+                    onClick={() => aplicarDestruccion('bomba_nuclear')}
+                  >
+                    <span className="sim-v2-destruct-icon">☢️</span>
+                    <span className="sim-v2-destruct-name">Bomba nuclear</span>
+                    <small>Detonación cegadora, hongo atómico y tierra calcinada.</small>
+                  </button>
+                  <button
+                    type="button"
+                    className="sim-v2-destruct-card zombies"
+                    disabled={destruccionAplicando || simulacion.estado !== 'en_curso'}
+                    onClick={() => aplicarDestruccion('zombies')}
+                  >
+                    <span className="sim-v2-destruct-icon">🧟</span>
+                    <span className="sim-v2-destruct-name">Zombies</span>
+                    <small>Hordas de no-muertos brotan del suelo y devoran todo.</small>
+                  </button>
                 </div>
               </section>
             </div>

@@ -49,6 +49,8 @@ export type TipoEvento =
   | 'aves_plaga' | 'jabalies' | 'langostas'
   // Subrealistas / técnicos
   | 'apagon_riego' | 'contaminacion_quimica' | 'marabunta_hormigas' | 'ola_radiacion_uv'
+  // Destrucción total — catástrofes irreales que aniquilan el cultivo al instante
+  | 'meteorito' | 'bomba_nuclear' | 'zombies'
   // Nuevas acciones de manejo
   | 'mulching' | 'control_biologico' | 'enmienda_calcica'
   | 'instalacion_malla' | 'compostaje' | 'aireacion_suelo';
@@ -130,6 +132,7 @@ export interface Simulacion {
   // Configuración de gameplay
   eventosAleatorios?: boolean;
   modoInvencible?: boolean;
+  dineroInfinito?: boolean;
   diasMaximos?: number;
   /** CSV con los tipos de evento permitidos como aleatorios del sistema.
    *  null/undefined → todos. Lista vacía o "*" → todos. */

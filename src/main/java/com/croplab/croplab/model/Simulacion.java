@@ -141,6 +141,9 @@ public class Simulacion {
     @Column(name = "modo_invencible")
     private Boolean modoInvencible = false;
 
+    @Column(name = "dinero_infinito")
+    private Boolean dineroInfinito = false;
+
     @Column(name = "dias_maximos")
     private Integer diasMaximos = 180;
 

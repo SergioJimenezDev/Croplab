@@ -181,6 +181,22 @@ public class SimulacionController {
         }
     }
 
+    @PutMapping("/{id}/dinero-infinito")
+    public ResponseEntity<ApiResponse<Simulacion>> actualizarDineroInfinito(
+            @PathVariable Long id,
+            @RequestParam boolean activo,
+            @AuthenticationPrincipal UserPrincipal userPrincipal) {
+        try {
+            Simulacion actualizada = simulacionService.setDineroInfinito(id, activo, userPrincipal.getId());
+            return ResponseEntity.ok(ApiResponse.success(
+                activo ? "Dinero infinito activado" : "Dinero infinito desactivado",
+                actualizada));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+    }
+
     @PutMapping("/{id}/eventos-aleatorios")
     public ResponseEntity<ApiResponse<Simulacion>> actualizarEventosAleatorios(
             @PathVariable Long id,

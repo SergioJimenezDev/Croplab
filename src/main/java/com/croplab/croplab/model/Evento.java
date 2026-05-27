@@ -81,6 +81,13 @@ public class Evento {
         // === Eventos técnicos y "subrealistas" (sistema) ===
         apagon_riego, contaminacion_quimica, marabunta_hormigas, ola_radiacion_uv,
 
+        // === Eventos de DESTRUCCIÓN TOTAL ===
+        // Catástrofes irreales que aniquilan el cultivo instantáneamente.
+        // No forman parte del pool aleatorio del sistema y nunca aparecen en
+        // "Modo realista"; solo se disparan manualmente desde la ventana de
+        // eventos destructivos. Su efecto es siempre saludActual = 0.
+        meteorito, bomba_nuclear, zombies,
+
         // === Nuevas acciones de manejo (usuario) ===
         mulching, control_biologico, enmienda_calcica,
         instalacion_malla, compostaje, aireacion_suelo

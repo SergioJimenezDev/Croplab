@@ -4,7 +4,11 @@ import type { Container, ISourceOptions } from '@tsparticles/engine';
 import { loadSlim } from '@tsparticles/slim';
 import { TipoEvento } from '../types';
 
-export type VFXEffect = TipoEvento;
+// VFXEffect amplía TipoEvento con efectos "virtuales" que sólo viven en el
+// frontend (no son tipos válidos para el backend). 'derribar_ovni' por ejemplo
+// es la animación local del cañón anti-OVNI: el evento real que se persiste
+// sigue siendo 'instalacion_malla'.
+export type VFXEffect = TipoEvento | 'derribar_ovni';
 
 interface EventVFXProps {
   effect: VFXEffect | null;
@@ -231,6 +235,11 @@ const configs: Partial<Record<VFXEffect, ISourceOptions>> = {
   compostaje: rising({ count: 130, colors: ['#5b3a14', '#5fae45', '#a07a4f', '#76512a'], size: { min: 3, max: 6 }, speed: { min: 1, max: 2.5 } }),
   aireacion_suelo: rising({ count: 160, colors: ['#bccfdc', '#dfe7ec', '#a8bcc8'], size: { min: 2, max: 5 }, speed: { min: 1.5, max: 4 } }),
 
+  // === Destrucción total — capas de partículas a juego con el 3D ===
+  meteorito: rising({ count: 200, colors: ['#ff6418', '#ffba50', '#ff2010', '#3a1a05'], size: { min: 3, max: 8 }, speed: { min: 4, max: 9 } }),
+  bomba_nuclear: rising({ count: 260, colors: ['#fff0a0', '#ff8a18', '#3aff66', '#1a0a05'], size: { min: 3, max: 9 }, speed: { min: 3, max: 8 } }),
+  zombies: rising({ count: 140, colors: ['#7aff8a', '#3a4a1a', '#5a0a08', '#1a0303'], size: { min: 2, max: 5 }, speed: { min: 1, max: 3 } }),
+
   otro: swarm({ count: 60, colors: ['#999999'], size: { min: 2, max: 4 }, speed: { min: 1, max: 3 } })
 };
 
@@ -291,6 +300,11 @@ const tintStyles: Partial<Record<VFXEffect, React.CSSProperties>> = {
   instalacion_malla: { background: 'radial-gradient(circle at 50% 50%, rgba(180,180,180,0.14), rgba(120,120,120,0.20))' },
   compostaje: { background: 'radial-gradient(circle at 50% 60%, rgba(120,160,80,0.12), rgba(80,60,30,0.22))' },
   aireacion_suelo: { background: 'radial-gradient(circle at 50% 50%, rgba(180,210,225,0.16), rgba(120,150,170,0.20))' },
+
+  // === Destrucción total — tintes apocalípticos ===
+  meteorito: { background: 'radial-gradient(circle at 50% 30%, rgba(255,140,40,0.30), rgba(80,15,5,0.55))' },
+  bomba_nuclear: { background: 'radial-gradient(circle at 50% 60%, rgba(255,230,120,0.35), rgba(60,180,80,0.20)), radial-gradient(circle at 50% 80%, rgba(20,5,5,0.55), rgba(0,0,0,0.0))' },
+  zombies: { background: 'radial-gradient(circle at 50% 70%, rgba(80,180,80,0.20), rgba(20,10,5,0.55))' },
 
   otro: { background: 'rgba(120,120,120,0.10)' }
 };

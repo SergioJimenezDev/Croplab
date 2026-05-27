@@ -258,10 +258,12 @@ public class SimulacionService {
             penalizacionTotal += 3 + random.nextDouble() * 5; // -3 a -8
         }
 
-        // 5. EVENTOS NEGATIVOS PREVIOS (plagas/enfermedades sin tratar en los últimos 10 días)
+        // 5. EVENTOS NEGATIVOS PREVIOS (plagas/enfermedades sin tratar).
+        // Los problemas fitosanitarios persisten indefinidamente hasta que se
+        // aplique tratamiento_fitosanitario o control_biologico — no caducan
+        // solos por el paso del tiempo.
         for (Evento evento : eventosCache) {
             if (!esPlagaOEnfermedad(evento.getTipoEvento())) continue;
-            if (evento.getDiaEvento() < diaActual - 10) continue;
             // Verificar si hubo tratamiento después en el mismo cache
             boolean tratado = false;
             for (Evento e : eventosCache) {
@@ -335,7 +337,11 @@ public class SimulacionService {
         evento.setOrigen(Evento.Origen.sistema);
         evento.setCosteEuros(BigDecimal.ZERO);
 
-        // Pool de eventos negativos del sistema con descripción e intensidad por defecto
+        // Pool de eventos negativos del sistema con descripción e intensidad por defecto.
+        // IMPORTANTE: los eventos de destrucción total (meteorito, bomba_nuclear,
+        // zombies) NO se incluyen aquí y nunca deben añadirse. Su única vía de
+        // disparo es la sección manual de "Efectos de destrucción" del panel de
+        // personalización. No deben aparecer en modo normal ni en modo realista.
         Evento.TipoEvento[] pool = new Evento.TipoEvento[] {
                 // Climáticos comunes (mayor frecuencia: aparecen varias veces)
                 Evento.TipoEvento.plaga, Evento.TipoEvento.plaga,
@@ -540,17 +546,21 @@ public class SimulacionService {
         BigDecimal coste = calcularCosteEvento(evento, simulacion);
         evento.setCosteEuros(coste);
 
-        // Verificar si hay presupuesto suficiente
-        if (simulacion.getPresupuestoActual().compareTo(coste) < 0) {
+        boolean dineroInfinito = Boolean.TRUE.equals(simulacion.getDineroInfinito());
+
+        // Verificar si hay presupuesto suficiente (salvo modo dinero infinito)
+        if (!dineroInfinito && simulacion.getPresupuestoActual().compareTo(coste) < 0) {
             throw new RuntimeException("Presupuesto insuficiente. Necesitas €" + coste + " pero solo tienes €" + simulacion.getPresupuestoActual());
         }
 
         // Aplicar efectos del evento
         aplicarEfectosEvento(simulacion, evento);
 
-        // Descontar del presupuesto
-        simulacion.setPresupuestoActual(simulacion.getPresupuestoActual().subtract(coste));
-        simulacion.setGastosTotales(simulacion.getGastosTotales().add(coste));
+        // Descontar del presupuesto (solo si no hay dinero infinito)
+        if (!dineroInfinito) {
+            simulacion.setPresupuestoActual(simulacion.getPresupuestoActual().subtract(coste));
+            simulacion.setGastosTotales(simulacion.getGastosTotales().add(coste));
+        }
 
         simulacionRepository.save(simulacion);
 
@@ -873,6 +883,27 @@ public class SimulacionService {
                 break;
             }
 
+            // ================= DESTRUCCIÓN TOTAL =================
+            // Estos eventos arrasan el cultivo de forma inmediata e irrecuperable.
+            // No participan del pool aleatorio del sistema, solo se aplican
+            // manualmente. Su efecto siempre es saludActual = 0; ignoran la
+            // intensidad y la situación previa de la planta.
+            case meteorito:
+            case bomba_nuclear:
+            case zombies: {
+                // Modo invencible respetado: aniquilación solo si NO es invencible
+                if (!Boolean.TRUE.equals(simulacion.getModoInvencible())) {
+                    simulacion.setSaludActual(BigDecimal.ZERO);
+                    simulacion.setAlturaActual(BigDecimal.ZERO);
+                    // La bomba nuclear también pulveriza la humedad del suelo
+                    if (evento.getTipoEvento() == Evento.TipoEvento.bomba_nuclear) {
+                        simulacion.setHumedadSueloActual(BigDecimal.ZERO);
+                    }
+                    simulacion.setEstado(Simulacion.Estado.fallida);
+                }
+                break;
+            }
+
             default:
                 break;
         }
@@ -1185,6 +1216,13 @@ public class SimulacionService {
         if (activo) {
             simulacion.setSaludActual(new BigDecimal("100.00"));
         }
+        return simulacionRepository.save(simulacion);
+    }
+
+    @Transactional
+    public Simulacion setDineroInfinito(Long simulacionId, boolean activo, Long userId) {
+        Simulacion simulacion = obtenerSimulacionPorId(simulacionId, userId);
+        simulacion.setDineroInfinito(activo);
         return simulacionRepository.save(simulacion);
     }
 

@@ -628,6 +628,10 @@ const archetype = (cultivo: TipoCultivo): PlantArchetype => {
 
 const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position, scale = 1, seed, vfxEvent }) => {
   const groupRef = useRef<THREE.Group>(null);
+  // Pivote intermedio para que las plantas se DOBLEN (efecto "hombro caído")
+  // en lugar de inclinarse rígidas desde la base. Repartimos la rotación entre
+  // baseRef (ligera inclinación) y tipPivotRef (curvatura del tercio superior).
+  const tipPivotRef = useRef<THREE.Group>(null);
   const swayPhase = useMemo(() => {
     const rng = makeRng(Math.round(seed * 1000));
     return rng() * Math.PI * 2;
@@ -691,6 +695,9 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
     if (muyEnferma) c.lerp(new THREE.Color('#7a5a2b'), 0.4);
     if (etapa === 'cosecha' && arche === 'cereal') c.lerp(new THREE.Color('#d4a857'), 0.6);
     if (vfxEvent === 'incendio_proximo') c.lerp(new THREE.Color('#1a0905'), 0.78);
+    else if (vfxEvent === 'meteorito') c.lerp(new THREE.Color('#1a0a04'), 0.85);
+    else if (vfxEvent === 'bomba_nuclear') c.lerp(new THREE.Color('#0a0805'), 0.92);
+    else if (vfxEvent === 'zombies') c.lerp(new THREE.Color('#2a1a08'), 0.65);
     else if (vfxEvent === 'lluvia_acida') c.lerp(new THREE.Color('#4a4a18'), 0.55);
     else if (vfxEvent === 'helada' || vfxEvent === 'nevada') c.lerp(new THREE.Color('#b4c8d0'), 0.30);
     return c;
@@ -828,16 +835,90 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
         rotX += Math.cos(t * 9 + phase2) * 0.05;
         break;
       }
+      case 'meteorito': {
+        // Lluvia de meteoritos: pulsos de impacto cada ~0.7s sobre un fondo
+        // de zarandeo violento. La planta se va aplastando contra el suelo y
+        // termina carbonizada y casi tumbada.
+        const ramp = Math.min(1, tVfx / 0.4);
+        const collapse = Math.min(1, tVfx / 3.0);
+        // Pulso de impacto (exponencial decay desde cada beat de 0.7s)
+        const pulseT = (tVfx % 0.7) / 0.7;
+        const pulse = Math.exp(-pulseT * 9) * 0.55 * ramp;
+        rotZ = swayBase - tilt
+          - collapse * 1.05 * (1 + bendDir * 0.4)
+          + Math.sin(t * 34 + swayPhase) * 0.6 * ramp
+          + Math.sin(t * 21 + phase2) * 0.3 * ramp
+          + bendDir * pulse;
+        rotX = Math.cos(t * 0.6 + swayPhase) * 0.025 + tilt * 0.35
+          + collapse * 0.45 * bendDir
+          + Math.cos(t * 27 + phase2) * 0.48 * ramp
+          + Math.sin(t * 39 + swayPhase) * 0.22 * ramp;
+        scaleY = 1 - collapse * 0.6;
+        offsetY = Math.abs(Math.sin(t * 24 + phase2)) * 0.09 * ramp - collapse * 0.05;
+        break;
+      }
+      case 'bomba_nuclear': {
+        // Onda expansiva inmediata: en 0.3s la planta sale despedida hacia atrás
+        // (respecto a la dirección bendDir). Luego incinerada y vibrando con la
+        // onda de calor residual. Casi totalmente aplastada al final.
+        const blast = Math.min(1, tVfx / 0.3);
+        const incin = Math.min(1, Math.max(0, (tVfx - 0.2) / 1.4));
+        const tremor = Math.sin(t * 48 + swayPhase) * 0.55 * (1 - incin * 0.4);
+        const tremor2 = Math.cos(t * 33 + phase2) * 0.4 * (1 - incin * 0.4);
+        rotZ = swayBase - tilt
+          - blast * 1.55 * (1 + bendDir * 0.5)
+          - incin * 0.4
+          + tremor
+          + bendDir * 0.35;
+        rotX = blast * 1.15 * bendDir
+          + tremor2
+          + tilt * 0.35
+          + incin * 0.3 * bendDir;
+        scaleY = 1 - blast * 0.25 - incin * 0.55;
+        offsetY = -blast * 0.04 - incin * 0.06;
+        break;
+      }
+      case 'zombies': {
+        // La horda pasa pisoteando: golpes secos no rítmicos en direcciones
+        // aleatorias (producto de dos senos a frecuencias inarmónicas) y
+        // aplastamiento progresivo conforme las plantas son trampeadas.
+        const stomp = Math.sin(t * 7 + phase2 * 7.3) * Math.sin(t * 13 + swayPhase * 3.7);
+        const violence = 0.75 * stomp;
+        const trample = Math.min(1, tVfx / 2.5);
+        rotZ = swayBase - tilt
+          - trample * 0.95 * (1 + bendDir * 0.35)
+          + violence
+          + Math.sin(t * 19 + swayPhase) * 0.35 * (1 - trample * 0.3);
+        rotX = Math.cos(t * 15 + phase2) * 0.45
+          + violence * 0.75
+          + tilt * 0.35
+          + trample * 0.4 * bendDir;
+        scaleY = 1 - trample * 0.6;
+        offsetY = Math.abs(Math.sin(t * 14 + phase2)) * 0.06 * (1 - trample * 0.5) - trample * 0.02;
+        break;
+      }
       default:
         // Sin desastre: solo postura base + sway suave
         break;
     }
 
-    groupRef.current.rotation.z = rotZ;
-    groupRef.current.rotation.x = rotX;
+    // Reparto de la rotación entre dos pivotes para conseguir doblado realista:
+    //  - baseRef (en el suelo): aporta una ligera inclinación de toda la planta.
+    //  - tipPivotRef (~30% de la altura): aporta la mayor parte del giro, de modo
+    //    que el follaje superior cae como si el tallo "cediera". Las sumas no
+    //    llegan al 100% del rotZ/rotX original a propósito: la curva queda más
+    //    natural que una vara rígida girando un ángulo total grande.
+    const baseFactor = 0.25;
+    const tipFactor = 0.7;
+    groupRef.current.rotation.z = rotZ * baseFactor;
+    groupRef.current.rotation.x = rotX * baseFactor;
     groupRef.current.scale.y = scaleY;
     // position[1] viene del JSX (0.05), añadimos offset por desastre encima.
     groupRef.current.position.y = position[1] + offsetY;
+    if (tipPivotRef.current) {
+      tipPivotRef.current.rotation.z = rotZ * tipFactor;
+      tipPivotRef.current.rotation.x = rotX * tipFactor;
+    }
   });
 
   // === Cálculos derivados de cada arquetipo ===
@@ -865,11 +946,12 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
 
   // === Render por arquetipo ===
 
-  // Durante un incendio las hojas/tallos brillan con tono ascua (emisivo naranja)
-  // por encima del color oscuro calcinado, dando sensación de plantas quemándose.
-  const isBurning = vfxEvent === 'incendio_proximo';
-  const burnEmissive = isBurning ? '#ff5418' : '#000000';
-  const burnEmissiveIntensity = isBurning ? 0.55 : 0;
+  // Durante un incendio o lluvia de meteoritos las hojas/tallos brillan con
+  // tono ascua. Bomba nuclear: brillo verdoso-amarillento de radiación.
+  const isBurning = vfxEvent === 'incendio_proximo' || vfxEvent === 'meteorito';
+  const isNuked = vfxEvent === 'bomba_nuclear';
+  const burnEmissive = isNuked ? '#9eff4a' : (isBurning ? '#ff5418' : '#000000');
+  const burnEmissiveIntensity = isNuked ? 0.7 : (isBurning ? 0.55 : 0);
 
   // Hoja: elipsoide aplanado en forma de lágrima, optionally con manchas
   const Hoja = ({ size, color }: { size: number; color: THREE.Color }) => (
@@ -913,24 +995,35 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
     </>
   );
 
+  // Altura del pivote de doblado: ~40% de la altura total. Solo la geometría
+  // que va DENTRO de tipPivotRef rota como tercio superior; lo demás queda
+  // anclado en el grupo base. Cada arquetipo monta su propio tipPivotRef
+  // envolviendo únicamente la parte alta (tallo superior + follaje alto +
+  // espigas/flores/frutos), de manera que la planta se "dobla" en lugar de
+  // tumbarse rígida.
+  const tipPivotY = altura * 0.4;
+  const upperShift: [number, number, number] = [0, -tipPivotY, 0];
+  const tipPivotPos: [number, number, number] = [0, tipPivotY, 0];
+
   return (
     <group ref={groupRef} position={position} scale={scale}>
       {/* ============ CEREAL (trigo/maíz/arroz/cebada) ============ */}
       {arche === 'cereal' && (
         <>
-          {/* Tallo principal */}
-          <mesh castShadow position={[0, altura / 2, 0]}>
-            <cylinderGeometry args={[0.025, 0.04, altura, 6]} />
+          {/* Tallo INFERIOR (anclado, va con groupRef) — radio interpolado en el corte */}
+          <mesh castShadow position={[0, tipPivotY / 2, 0]}>
+            <cylinderGeometry args={[0.04 + (0.025 - 0.04) * (tipPivotY / altura), 0.04, tipPivotY, 6]} />
             <meshStandardMaterial color={tronco} roughness={0.85} />
           </mesh>
-          {/* Hojas largas verticales */}
+          {/* Hojas inferiores (y < pivote) */}
           {hojasParams.slice(0, numHojas).map((p, i) => {
-            const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
             const y = (i / numHojas) * altura * 0.85 + altura * 0.1;
+            if (y >= tipPivotY) return null;
+            const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
             const len = follajeFactor * 0.55 * p.sizeMul;
             const droopHoja = 0.05 + droopAmount * 0.55;
             return (
-              <group key={i} position={[Math.cos(ang) * 0.04, y, Math.sin(ang) * 0.04]} rotation={[droopHoja + p.tiltJitter, ang, -0.4 + droopHoja]}>
+              <group key={`lo-${i}`} position={[Math.cos(ang) * 0.04, y, Math.sin(ang) * 0.04]} rotation={[droopHoja + p.tiltJitter, ang, -0.4 + droopHoja]}>
                 <mesh castShadow scale={[len * 0.08, len * 0.02, len]}>
                   <sphereGeometry args={[1, 6, 4]} />
                   <meshStandardMaterial color={colorHoja} roughness={0.75} side={THREE.DoubleSide} />
@@ -939,58 +1032,82 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
               </group>
             );
           })}
-          {/* Espiga/mazorca al final si está espigado */}
-          {(etapa === 'floracion' || etapa === 'fructificacion' || etapa === 'maduracion' || etapa === 'cosecha') && (
-            cultivo === 'maiz' ? (
-              // Mazorca de maíz
-              <mesh castShadow position={[0.12, altura * 0.6, 0]} rotation={[0, 0, -0.3]}>
-                <cylinderGeometry args={[0.06, 0.05, 0.25, 8]} />
-                <meshStandardMaterial color={etapa === 'cosecha' || etapa === 'maduracion' ? '#fdd835' : '#cfe28a'} roughness={0.6} />
+
+          {/* PARTE SUPERIOR — gira con tipPivotRef ⇒ la planta se DOBLA en el pivote */}
+          <group ref={tipPivotRef} position={tipPivotPos}>
+            <group position={upperShift}>
+              {/* Tallo SUPERIOR */}
+              <mesh castShadow position={[0, (tipPivotY + altura) / 2, 0]}>
+                <cylinderGeometry args={[0.025, 0.04 + (0.025 - 0.04) * (tipPivotY / altura), altura - tipPivotY, 6]} />
+                <meshStandardMaterial color={tronco} roughness={0.85} />
               </mesh>
-            ) : (
-              // Espiga de trigo/cebada/arroz
-              <group position={[0, altura * 1.02, 0]}>
-                <mesh castShadow scale={[0.06, 0.25, 0.06]}>
-                  <sphereGeometry args={[1, 6, 6]} />
-                  <meshStandardMaterial color={etapa === 'cosecha' || etapa === 'maduracion' ? '#d4a857' : '#9fb555'} roughness={0.85} />
-                </mesh>
-                {/* Aristas (pelos de la espiga) */}
-                {Array.from({ length: 8 }).map((_, k) => (
-                  <mesh key={k} position={[0, 0.15 + k * 0.02, 0]} rotation={[0, k, 0.6]} scale={[0.005, 0.12, 0.005]}>
-                    <cylinderGeometry args={[1, 1, 1, 4]} />
-                    <meshStandardMaterial color={etapa === 'cosecha' ? '#c98c2c' : '#a0b045'} />
+              {/* Hojas superiores (y >= pivote) */}
+              {hojasParams.slice(0, numHojas).map((p, i) => {
+                const y = (i / numHojas) * altura * 0.85 + altura * 0.1;
+                if (y < tipPivotY) return null;
+                const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
+                const len = follajeFactor * 0.55 * p.sizeMul;
+                const droopHoja = 0.05 + droopAmount * 0.55;
+                return (
+                  <group key={`up-${i}`} position={[Math.cos(ang) * 0.04, y, Math.sin(ang) * 0.04]} rotation={[droopHoja + p.tiltJitter, ang, -0.4 + droopHoja]}>
+                    <mesh castShadow scale={[len * 0.08, len * 0.02, len]}>
+                      <sphereGeometry args={[1, 6, 4]} />
+                      <meshStandardMaterial color={colorHoja} roughness={0.75} side={THREE.DoubleSide} />
+                    </mesh>
+                    {numManchas > 0 && <Manchas size={len} n={numManchas} params={p} />}
+                  </group>
+                );
+              })}
+              {/* Espiga/mazorca al final si está espigado */}
+              {(etapa === 'floracion' || etapa === 'fructificacion' || etapa === 'maduracion' || etapa === 'cosecha') && (
+                cultivo === 'maiz' ? (
+                  <mesh castShadow position={[0.12, altura * 0.6, 0]} rotation={[0, 0, -0.3]}>
+                    <cylinderGeometry args={[0.06, 0.05, 0.25, 8]} />
+                    <meshStandardMaterial color={etapa === 'cosecha' || etapa === 'maduracion' ? '#fdd835' : '#cfe28a'} roughness={0.6} />
                   </mesh>
-                ))}
-              </group>
-            )
-          )}
+                ) : (
+                  <group position={[0, altura * 1.02, 0]}>
+                    <mesh castShadow scale={[0.06, 0.25, 0.06]}>
+                      <sphereGeometry args={[1, 6, 6]} />
+                      <meshStandardMaterial color={etapa === 'cosecha' || etapa === 'maduracion' ? '#d4a857' : '#9fb555'} roughness={0.85} />
+                    </mesh>
+                    {Array.from({ length: 8 }).map((_, k) => (
+                      <mesh key={k} position={[0, 0.15 + k * 0.02, 0]} rotation={[0, k, 0.6]} scale={[0.005, 0.12, 0.005]}>
+                        <cylinderGeometry args={[1, 1, 1, 4]} />
+                        <meshStandardMaterial color={etapa === 'cosecha' ? '#c98c2c' : '#a0b045'} />
+                      </mesh>
+                    ))}
+                  </group>
+                )
+              )}
+            </group>
+          </group>
         </>
       )}
 
       {/* ============ ARBUSTO (tomate, pimiento, judía, guisante, soja) ============ */}
       {arche === 'arbusto' && (
         <>
-          {/* Tallo */}
-          <mesh castShadow position={[0, altura / 2, 0]}>
-            <cylinderGeometry args={[0.03, 0.05, altura, 6]} />
+          {/* Tallo INFERIOR */}
+          <mesh castShadow position={[0, tipPivotY / 2, 0]}>
+            <cylinderGeometry args={[0.05 + (0.03 - 0.05) * (tipPivotY / altura), 0.05, tipPivotY, 6]} />
             <meshStandardMaterial color={tronco} roughness={0.85} />
           </mesh>
-          {/* Ramas y hojas */}
+          {/* Ramas y hojas inferiores */}
           {hojasParams.slice(0, numHojas).map((p, i) => {
-            const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
             const yT = i / Math.max(numHojas - 1, 1);
             const y = altura * (0.2 + yT * 0.75);
+            if (y >= tipPivotY) return null;
+            const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
             const ramaLen = 0.12 + follajeFactor * 0.15 * p.sizeMul;
             const hojaSize = follajeFactor * 0.32 * p.sizeMul;
             const tiltDroop = p.ramaTilt + droopAmount * 0.85 + p.tiltJitter;
             return (
-              <group key={i} position={[0, y, 0]} rotation={[0, ang, 0]}>
-                {/* Pecíolo / rama */}
+              <group key={`lo-${i}`} position={[0, y, 0]} rotation={[0, ang, 0]}>
                 <mesh position={[ramaLen / 2, 0, 0]} rotation={[0, 0, -tiltDroop]}>
                   <cylinderGeometry args={[0.01, 0.012, ramaLen, 4]} />
                   <meshStandardMaterial color={tronco} roughness={0.85} />
                 </mesh>
-                {/* Hoja al final de la rama */}
                 <group position={[ramaLen, -tiltDroop * 0.05, 0]} rotation={[0, 0, -tiltDroop]}>
                   <Hoja size={hojaSize} color={colorHoja} />
                   {numManchas > 0 && <Manchas size={hojaSize} n={numManchas} params={p} />}
@@ -998,23 +1115,55 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
               </group>
             );
           })}
-          {/* Frutos colgantes */}
-          {frutosParams.slice(0, numFrutos).map((p, i) => {
-            const ang = (i * 360 / numFrutos) * (Math.PI / 180) + seed + p.angleJitter;
-            const y = altura * (0.5 + p.yJitter);
-            const r = 0.18;
-            const size = 0.06 * frutoSizeFactor * p.sizeMul;
-            // Tomate redondo, pimiento alargado, judía vaina
-            const scaleArr: [number, number, number] = cultivo === 'pimiento' ? [1, 1.6, 1]
-              : (cultivo === 'judia' || cultivo === 'guisante') ? [0.7, 0.7, 2.2]
-              : [1, 1, 1];
-            return (
-              <mesh key={i} castShadow position={[Math.cos(ang) * r, y, Math.sin(ang) * r]} scale={scaleArr}>
-                <sphereGeometry args={[size, 8, 6]} />
-                <meshStandardMaterial color={etapa === 'fructificacion' ? '#7faa50' : colorFruto} roughness={0.4} />
+
+          {/* PARTE SUPERIOR — se dobla */}
+          <group ref={tipPivotRef} position={tipPivotPos}>
+            <group position={upperShift}>
+              {/* Tallo SUPERIOR */}
+              <mesh castShadow position={[0, (tipPivotY + altura) / 2, 0]}>
+                <cylinderGeometry args={[0.03, 0.05 + (0.03 - 0.05) * (tipPivotY / altura), altura - tipPivotY, 6]} />
+                <meshStandardMaterial color={tronco} roughness={0.85} />
               </mesh>
-            );
-          })}
+              {/* Ramas y hojas superiores */}
+              {hojasParams.slice(0, numHojas).map((p, i) => {
+                const yT = i / Math.max(numHojas - 1, 1);
+                const y = altura * (0.2 + yT * 0.75);
+                if (y < tipPivotY) return null;
+                const ang = (i * 137.5 * Math.PI) / 180 + seed + p.angleJitter;
+                const ramaLen = 0.12 + follajeFactor * 0.15 * p.sizeMul;
+                const hojaSize = follajeFactor * 0.32 * p.sizeMul;
+                const tiltDroop = p.ramaTilt + droopAmount * 0.85 + p.tiltJitter;
+                return (
+                  <group key={`up-${i}`} position={[0, y, 0]} rotation={[0, ang, 0]}>
+                    <mesh position={[ramaLen / 2, 0, 0]} rotation={[0, 0, -tiltDroop]}>
+                      <cylinderGeometry args={[0.01, 0.012, ramaLen, 4]} />
+                      <meshStandardMaterial color={tronco} roughness={0.85} />
+                    </mesh>
+                    <group position={[ramaLen, -tiltDroop * 0.05, 0]} rotation={[0, 0, -tiltDroop]}>
+                      <Hoja size={hojaSize} color={colorHoja} />
+                      {numManchas > 0 && <Manchas size={hojaSize} n={numManchas} params={p} />}
+                    </group>
+                  </group>
+                );
+              })}
+              {/* Frutos colgantes (van con la parte superior) */}
+              {frutosParams.slice(0, numFrutos).map((p, i) => {
+                const ang = (i * 360 / numFrutos) * (Math.PI / 180) + seed + p.angleJitter;
+                const y = altura * (0.5 + p.yJitter);
+                const r = 0.18;
+                const size = 0.06 * frutoSizeFactor * p.sizeMul;
+                const scaleArr: [number, number, number] = cultivo === 'pimiento' ? [1, 1.6, 1]
+                  : (cultivo === 'judia' || cultivo === 'guisante') ? [0.7, 0.7, 2.2]
+                  : [1, 1, 1];
+                return (
+                  <mesh key={i} castShadow position={[Math.cos(ang) * r, y, Math.sin(ang) * r]} scale={scaleArr}>
+                    <sphereGeometry args={[size, 8, 6]} />
+                    <meshStandardMaterial color={etapa === 'fructificacion' ? '#7faa50' : colorFruto} roughness={0.4} />
+                  </mesh>
+                );
+              })}
+            </group>
+          </group>
         </>
       )}
 
@@ -1050,58 +1199,62 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
       {/* ============ ÁRBOL (olivo, vid) ============ */}
       {arche === 'arbol' && (
         <>
-          {/* Tronco grueso */}
+          {/* Tronco grueso — queda RÍGIDO (un olivo no se dobla por el tallo) */}
           <mesh castShadow position={[0, altura * 0.3, 0]}>
             <cylinderGeometry args={[0.07, 0.1, altura * 0.6, 8]} />
             <meshStandardMaterial color="#5a3a14" roughness={0.95} />
           </mesh>
-          {/* Copa: bola de follaje */}
-          <mesh castShadow position={[0, altura * 0.75, 0]} scale={[follajeFactor * 0.55, follajeFactor * 0.4, follajeFactor * 0.55]}>
-            <sphereGeometry args={[1, 10, 8]} />
-            <meshStandardMaterial color={colorHoja} roughness={0.8} />
-          </mesh>
-          {/* Ramas internas más pequeñas */}
-          {hojasParams.slice(0, 4).map((p, i) => {
-            const ang = (i * 90 * Math.PI) / 180 + seed;
-            return (
-              <mesh key={i} castShadow position={[Math.cos(ang) * follajeFactor * 0.35, altura * 0.7, Math.sin(ang) * follajeFactor * 0.35]} scale={[follajeFactor * 0.22, follajeFactor * 0.2, follajeFactor * 0.22]}>
-                <sphereGeometry args={[1, 8, 6]} />
-                <meshStandardMaterial color={colorHoja.clone().multiplyScalar(0.9)} roughness={0.85} />
+
+          {/* COPA + ramas + frutos — pivotan justo encima del tronco */}
+          <group ref={tipPivotRef} position={[0, altura * 0.6, 0]}>
+            <group position={[0, -altura * 0.6, 0]}>
+              <mesh castShadow position={[0, altura * 0.75, 0]} scale={[follajeFactor * 0.55, follajeFactor * 0.4, follajeFactor * 0.55]}>
+                <sphereGeometry args={[1, 10, 8]} />
+                <meshStandardMaterial color={colorHoja} roughness={0.8} />
               </mesh>
-            );
-          })}
-          {/* Frutos esparcidos en la copa */}
-          {frutosParams.slice(0, numFrutos).map((p, i) => {
-            const ang = (i * 360 / Math.max(numFrutos, 1)) * (Math.PI / 180) + seed;
-            const r = follajeFactor * 0.4;
-            const y = altura * (0.7 + p.yJitter * 0.4);
-            const size = 0.045 * frutoSizeFactor * p.sizeMul;
-            return (
-              <mesh key={i} castShadow position={[Math.cos(ang) * r, y, Math.sin(ang) * r]}>
-                <sphereGeometry args={[size, 6, 6]} />
-                <meshStandardMaterial color={colorFruto} roughness={0.5} />
-              </mesh>
-            );
-          })}
+              {hojasParams.slice(0, 4).map((p, i) => {
+                const ang = (i * 90 * Math.PI) / 180 + seed;
+                return (
+                  <mesh key={i} castShadow position={[Math.cos(ang) * follajeFactor * 0.35, altura * 0.7, Math.sin(ang) * follajeFactor * 0.35]} scale={[follajeFactor * 0.22, follajeFactor * 0.2, follajeFactor * 0.22]}>
+                    <sphereGeometry args={[1, 8, 6]} />
+                    <meshStandardMaterial color={colorHoja.clone().multiplyScalar(0.9)} roughness={0.85} />
+                  </mesh>
+                );
+              })}
+              {frutosParams.slice(0, numFrutos).map((p, i) => {
+                const ang = (i * 360 / Math.max(numFrutos, 1)) * (Math.PI / 180) + seed;
+                const r = follajeFactor * 0.4;
+                const y = altura * (0.7 + p.yJitter * 0.4);
+                const size = 0.045 * frutoSizeFactor * p.sizeMul;
+                return (
+                  <mesh key={i} castShadow position={[Math.cos(ang) * r, y, Math.sin(ang) * r]}>
+                    <sphereGeometry args={[size, 6, 6]} />
+                    <meshStandardMaterial color={colorFruto} roughness={0.5} />
+                  </mesh>
+                );
+              })}
+            </group>
+          </group>
         </>
       )}
 
       {/* ============ GIRASOL / COLZA ============ */}
       {arche === 'girasol' && (
         <>
-          {/* Tallo alto */}
-          <mesh castShadow position={[0, altura / 2, 0]}>
-            <cylinderGeometry args={[0.035, 0.06, altura, 6]} />
+          {/* Tallo INFERIOR */}
+          <mesh castShadow position={[0, tipPivotY / 2, 0]}>
+            <cylinderGeometry args={[0.06 + (0.035 - 0.06) * (tipPivotY / altura), 0.06, tipPivotY, 6]} />
             <meshStandardMaterial color="#4d7c2e" roughness={0.85} />
           </mesh>
-          {/* Hojas grandes */}
+          {/* Hojas inferiores */}
           {hojasParams.slice(0, Math.min(numHojas, 6)).map((p, i) => {
-            const ang = (i * 137.5 * Math.PI) / 180 + seed;
             const y = (i / 6) * altura * 0.7 + altura * 0.15;
+            if (y >= tipPivotY) return null;
+            const ang = (i * 137.5 * Math.PI) / 180 + seed;
             const len = follajeFactor * 0.45 * p.sizeMul;
             const tilt = 0.25 + droopAmount * 0.6 + p.tiltJitter;
             return (
-              <group key={i} position={[0, y, 0]} rotation={[0, ang, 0]}>
+              <group key={`lo-${i}`} position={[0, y, 0]} rotation={[0, ang, 0]}>
                 <group position={[len * 0.4, 0, 0]} rotation={[0, 0, -tilt]}>
                   <Hoja size={len} color={colorHoja} />
                   {numManchas > 0 && <Manchas size={len} n={numManchas} params={p} />}
@@ -1109,26 +1262,48 @@ const Plant: React.FC<PlantProps> = ({ etapa, salud, alturaCm, cultivo, position
               </group>
             );
           })}
-          {/* Flor grande tipo girasol al final */}
-          {(etapa === 'floracion' || etapa === 'fructificacion' || etapa === 'maduracion' || etapa === 'cosecha') && (
-            <group position={[0, altura, 0]} rotation={[etapa === 'cosecha' ? 0.6 : -0.2, 0, 0]}>
-              {/* Disco central marrón */}
-              <mesh castShadow>
-                <sphereGeometry args={[0.13, 12, 10]} />
-                <meshStandardMaterial color={cultivo === 'colza' ? '#f6d54a' : '#5a3a14'} roughness={0.85} />
+
+          {/* PARTE SUPERIOR — flor + tallo alto, se dobla */}
+          <group ref={tipPivotRef} position={tipPivotPos}>
+            <group position={upperShift}>
+              <mesh castShadow position={[0, (tipPivotY + altura) / 2, 0]}>
+                <cylinderGeometry args={[0.035, 0.06 + (0.035 - 0.06) * (tipPivotY / altura), altura - tipPivotY, 6]} />
+                <meshStandardMaterial color="#4d7c2e" roughness={0.85} />
               </mesh>
-              {/* Pétalos */}
-              {Array.from({ length: cultivo === 'colza' ? 8 : 14 }).map((_, k) => {
-                const a = (k * 360 / (cultivo === 'colza' ? 8 : 14)) * Math.PI / 180;
+              {hojasParams.slice(0, Math.min(numHojas, 6)).map((p, i) => {
+                const y = (i / 6) * altura * 0.7 + altura * 0.15;
+                if (y < tipPivotY) return null;
+                const ang = (i * 137.5 * Math.PI) / 180 + seed;
+                const len = follajeFactor * 0.45 * p.sizeMul;
+                const tilt = 0.25 + droopAmount * 0.6 + p.tiltJitter;
                 return (
-                  <mesh key={k} position={[Math.cos(a) * 0.18, 0, Math.sin(a) * 0.18]} rotation={[0, -a, 0]} scale={[0.13, 0.02, 0.06]}>
-                    <sphereGeometry args={[1, 6, 4]} />
-                    <meshStandardMaterial color={cultivo === 'colza' ? '#f9e065' : '#ffd54f'} emissive="#ffd54f" emissiveIntensity={0.15} roughness={0.5} side={THREE.DoubleSide} />
-                  </mesh>
+                  <group key={`up-${i}`} position={[0, y, 0]} rotation={[0, ang, 0]}>
+                    <group position={[len * 0.4, 0, 0]} rotation={[0, 0, -tilt]}>
+                      <Hoja size={len} color={colorHoja} />
+                      {numManchas > 0 && <Manchas size={len} n={numManchas} params={p} />}
+                    </group>
+                  </group>
                 );
               })}
+              {(etapa === 'floracion' || etapa === 'fructificacion' || etapa === 'maduracion' || etapa === 'cosecha') && (
+                <group position={[0, altura, 0]} rotation={[etapa === 'cosecha' ? 0.6 : -0.2, 0, 0]}>
+                  <mesh castShadow>
+                    <sphereGeometry args={[0.13, 12, 10]} />
+                    <meshStandardMaterial color={cultivo === 'colza' ? '#f6d54a' : '#5a3a14'} roughness={0.85} />
+                  </mesh>
+                  {Array.from({ length: cultivo === 'colza' ? 8 : 14 }).map((_, k) => {
+                    const a = (k * 360 / (cultivo === 'colza' ? 8 : 14)) * Math.PI / 180;
+                    return (
+                      <mesh key={k} position={[Math.cos(a) * 0.18, 0, Math.sin(a) * 0.18]} rotation={[0, -a, 0]} scale={[0.13, 0.02, 0.06]}>
+                        <sphereGeometry args={[1, 6, 4]} />
+                        <meshStandardMaterial color={cultivo === 'colza' ? '#f9e065' : '#ffd54f'} emissive="#ffd54f" emissiveIntensity={0.15} roughness={0.5} side={THREE.DoubleSide} />
+                      </mesh>
+                    );
+                  })}
+                </group>
+              )}
             </group>
-          )}
+          </group>
         </>
       )}
 
@@ -2341,6 +2516,1995 @@ const HeavyRain: React.FC<{ active: boolean; durationSec?: number }> = ({ active
 };
 
 // ============================================================
+// OVNI + Radiación UV — un platillo entra desde la izquierda,
+// sobrevuela la parcela y dispara un haz UV verdoso/violeta sobre
+// el cultivo, con anillos pulsantes en el suelo. Tras una pausa,
+// sale por la derecha.
+// ============================================================
+
+const UFORadiation: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 7 }) => {
+  const ufoRef = useRef<THREE.Group>(null);
+  const discRef = useRef<THREE.Mesh>(null);
+  const beamRef = useRef<THREE.Mesh>(null);
+  const beamGlowRef = useRef<THREE.Mesh>(null);
+  const ringsRef = useRef<THREE.Group>(null);
+  const motesRef = useRef<THREE.Group>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const getElapsed = useEffectClock(active);
+
+  const portholes = useMemo(() => {
+    return Array.from({ length: 8 }).map((_, i) => {
+      const ang = (i / 8) * Math.PI * 2;
+      return { x: Math.cos(ang) * 1.05, z: Math.sin(ang) * 1.05 };
+    });
+  }, []);
+
+  // Pequeños iconitos UV (rayos) que caen por el haz hacia el suelo
+  const motes = useMemo(() => {
+    const rng = makeRng(123001);
+    return Array.from({ length: 22 }).map(() => ({
+      x: (rng() - 0.5) * 1.1,
+      z: (rng() - 0.5) * 1.1,
+      yPhase: rng(),
+      speed: 0.7 + rng() * 0.8,
+      size: 0.05 + rng() * 0.08
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+
+    // El OVNI entra UNA vez desde la izquierda y se queda estacionado de forma
+    // indefinida hasta que el jugador lo derribe con el cañón. La coreografía
+    // del haz va en su propio ciclo, independiente de la entrada.
+    const entryDuration = Math.min(1.6, durationSec * 0.25);
+    let x: number;
+    if (t < entryDuration) {
+      const k = t / entryDuration;
+      x = -9 + k * 9;
+    } else {
+      // Bamboleo lento mientras está parado
+      x = 0 + Math.sin(state.clock.elapsedTime * 0.6) * 0.35;
+    }
+    const y = 5.5 + Math.sin(state.clock.elapsedTime * 1.6) * 0.18;
+
+    if (ufoRef.current) {
+      ufoRef.current.position.set(x, y, 0);
+      ufoRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 1.2) * 0.07;
+    }
+    if (discRef.current) {
+      discRef.current.rotation.y = state.clock.elapsedTime * 2.5;
+    }
+
+    // Haz UV: pulsa cada ~4 s mientras el OVNI esté parado.
+    //   on  [0.15 → 0.65]: disparo (crece y se cierra)
+    //   off [0.65 → 1.15]: descansa medio segundo y vuelve a empezar
+    let beamScale = 0;
+    if (t >= entryDuration) {
+      const beamCycle = 4.0;
+      const phase = ((t - entryDuration) / beamCycle) % 1;
+      if (phase > 0.15 && phase < 0.65) {
+        const progress = (phase - 0.15) / 0.5;
+        beamScale = Math.sin(progress * Math.PI);
+      }
+    }
+    const beamActive = beamScale > 0;
+
+    if (beamRef.current) {
+      const mat = beamRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = beamScale * 0.7;
+      beamRef.current.position.x = x;
+      beamRef.current.scale.x = beamScale;
+      beamRef.current.scale.z = beamScale;
+    }
+    if (beamGlowRef.current) {
+      const mat = beamGlowRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = beamScale * 0.25;
+      beamGlowRef.current.position.x = x;
+      beamGlowRef.current.scale.x = beamScale * 1.6;
+      beamGlowRef.current.scale.z = beamScale * 1.6;
+    }
+    if (lightRef.current) {
+      lightRef.current.position.set(x, 0.5, 0);
+      lightRef.current.intensity = beamScale * 2.5;
+    }
+
+    // Anillos pulsantes en el suelo (sólo mientras dispara)
+    if (ringsRef.current) {
+      ringsRef.current.position.x = x;
+      ringsRef.current.visible = beamActive;
+      ringsRef.current.children.forEach((c, i) => {
+        const localPhase = (state.clock.elapsedTime * 0.8 + i * 0.33) % 1;
+        c.scale.setScalar(0.4 + localPhase * 3);
+        const mat = ((c as THREE.Mesh).material) as THREE.MeshBasicMaterial;
+        mat.opacity = beamScale * (1 - localPhase) * 0.6;
+      });
+    }
+
+    // Partículas dentro del haz
+    if (motesRef.current) {
+      motesRef.current.children.forEach((c, idx) => {
+        const m = motes[idx]; if (!m) return;
+        const phase = ((state.clock.elapsedTime * m.speed + m.yPhase) % 1);
+        c.position.x = x + m.x;
+        c.position.z = m.z;
+        c.position.y = 5 - phase * 5;
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = beamScale * (1 - phase) * 0.9;
+      });
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Platillo: cuerpo + cúpula + ojos de buey + halo inferior */}
+      <group ref={ufoRef} position={[-9, 5.5, 0]}>
+        {/* Disco principal */}
+        <mesh ref={discRef} castShadow>
+          <cylinderGeometry args={[1.4, 1.0, 0.32, 24]} />
+          <meshStandardMaterial color="#9aa6b0" metalness={0.85} roughness={0.25} />
+        </mesh>
+        {/* Banda inferior brillante */}
+        <mesh position={[0, -0.18, 0]}>
+          <cylinderGeometry args={[1.0, 0.85, 0.12, 24]} />
+          <meshStandardMaterial color="#1a1f24" metalness={0.7} roughness={0.3} />
+        </mesh>
+        {/* Cúpula superior tipo cristal verde */}
+        <mesh position={[0, 0.28, 0]}>
+          <sphereGeometry args={[0.7, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshStandardMaterial
+            color="#5fffb5"
+            emissive="#5fffb5"
+            emissiveIntensity={0.35}
+            transparent
+            opacity={0.65}
+            metalness={0.2}
+            roughness={0.1}
+          />
+        </mesh>
+        {/* Ojos de buey luminosos */}
+        {portholes.map((p, i) => (
+          <mesh key={i} position={[p.x, -0.05, p.z]} scale={0.15}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color="#caffd6" emissive="#9bff8a" emissiveIntensity={1.4} />
+          </mesh>
+        ))}
+        {/* Anillo brillante alrededor del platillo */}
+        <mesh position={[0, -0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[1.45, 1.6, 32]} />
+          <meshBasicMaterial color="#a6ff9b" transparent opacity={0.55} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+
+      {/* Haz UV (cono ancho y suave) */}
+      <mesh ref={beamRef} position={[-9, 0, 0]} rotation={[Math.PI, 0, 0]} scale={0}>
+        <coneGeometry args={[1.6, 5.2, 24, 1, true]} />
+        <meshStandardMaterial
+          color="#9bff8a"
+          emissive="#9bff8a"
+          emissiveIntensity={1.0}
+          transparent
+          opacity={0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* Halo exterior del haz, más ancho y menos opaco */}
+      <mesh ref={beamGlowRef} position={[-9, 0, 0]} rotation={[Math.PI, 0, 0]} scale={0}>
+        <coneGeometry args={[2.4, 5.2, 24, 1, true]} />
+        <meshStandardMaterial
+          color="#caffb8"
+          emissive="#caffb8"
+          emissiveIntensity={0.6}
+          transparent
+          opacity={0}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Partículas dentro del haz */}
+      <group ref={motesRef}>
+        {motes.map((m, i) => (
+          <mesh key={i} position={[0, 5, 0]} scale={m.size}>
+            <sphereGeometry args={[1, 6, 4]} />
+            <meshStandardMaterial
+              color="#daffb8"
+              emissive="#9bff8a"
+              emissiveIntensity={1.4}
+              transparent
+              opacity={0}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Anillos pulsantes en el suelo */}
+      <group ref={ringsRef} position={[-9, 0.05, 0]}>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <mesh key={i} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.9, 1.0, 32]} />
+            <meshBasicMaterial color="#9bff8a" transparent opacity={0} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Luz verdosa que ilumina la parcela durante el disparo */}
+      <pointLight ref={lightRef} position={[0, 0.5, 0]} color="#9bff8a" distance={10} decay={2} intensity={0} />
+    </>
+  );
+};
+
+// ============================================================
+// DERRIBAR OVNI 🎯 — coreografía irreal en ~7 s:
+//   t=0.0 → 1.2   OVNI entra desde la izquierda; un cañón anti-aéreo
+//                emerge del suelo (sale desde y=-2 hasta y=0).
+//   t=1.2 → 2.0  Cañón apunta al OVNI; la boca del cañón se carga con
+//                un glow cian creciente.
+//   t=2.0 → 2.5  ¡DISPARO! Muzzle flash + proyectil glowing hacia el OVNI,
+//                con su propia estela de partículas.
+//   t=2.5 → 2.65 Impacto: flash blanco, fireball naranja, onda de choque
+//                (anillo) y esquirlas saliendo en todas direcciones.
+//   t=2.65 → 4.5 El OVNI cae girando, envuelto en fuego y dejando estela.
+//   t=4.5 → 4.7  Impacto en el suelo: explosión secundaria + cráter +
+//                onda de choque + escombros volando.
+//   t=4.7 → 7.0  Columna de humo elevándose. Restos echando humo en suelo.
+// ============================================================
+
+const UFOShootDown: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 7 }) => {
+  const ufoRef = useRef<THREE.Group>(null);
+  const ufoBodyRef = useRef<THREE.Group>(null);   // sub-grupo para el spin de la caída
+  const cannonGroupRef = useRef<THREE.Group>(null);
+  const cannonHeadRef = useRef<THREE.Group>(null);
+  const muzzleGlowRef = useRef<THREE.Mesh>(null);
+  const muzzleFlashRef = useRef<THREE.Mesh>(null);
+  const projectileRef = useRef<THREE.Group>(null);
+  const projectileTrailRef = useRef<THREE.Group>(null);
+  const impactFlashRef = useRef<THREE.Mesh>(null);
+  const impactFireballRef = useRef<THREE.Mesh>(null);
+  const impactShockRef = useRef<THREE.Mesh>(null);
+  const shrapnelRef = useRef<THREE.Group>(null);
+  const fireTrailRef = useRef<THREE.Group>(null);
+  const ufoFireRef = useRef<THREE.Mesh>(null);
+  const groundFlashRef = useRef<THREE.Mesh>(null);
+  const groundFireRef = useRef<THREE.Mesh>(null);
+  const groundShockRef = useRef<THREE.Mesh>(null);
+  const groundShock2Ref = useRef<THREE.Mesh>(null);
+  const debrisRef = useRef<THREE.Group>(null);
+  const smokeColumnRef = useRef<THREE.Group>(null);
+  const craterRef = useRef<THREE.Mesh>(null);
+  const muzzleLightRef = useRef<THREE.PointLight>(null);
+  const explosionLightRef = useRef<THREE.PointLight>(null);
+  const fireLightRef = useRef<THREE.PointLight>(null);
+  const getElapsed = useEffectClock(active);
+
+  // === Posiciones clave ===
+  const PARK_X = 0, PARK_Y = 5.5;
+  const CANNON_BASE_X = 0, CANNON_BASE_Z = -3;
+  // Punto de impacto en el suelo (dentro de la parcela, ligeramente desplazado).
+  const CRASH_X = 1.5, CRASH_Z = 1.0;
+
+  // === Datos aleatorios pre-calculados (estables entre renders) ===
+  const shrapnel = useMemo(() => {
+    const rng = makeRng(770001);
+    return Array.from({ length: 28 }).map(() => ({
+      vx: (rng() - 0.5) * 8,
+      vy: 2 + rng() * 4,
+      vz: (rng() - 0.5) * 8,
+      size: 0.05 + rng() * 0.13,
+      spin: (rng() - 0.5) * 12
+    }));
+  }, []);
+  const debris = useMemo(() => {
+    const rng = makeRng(770002);
+    return Array.from({ length: 22 }).map(() => ({
+      vx: (rng() - 0.5) * 6,
+      vy: 1.5 + rng() * 3.5,
+      vz: (rng() - 0.5) * 6,
+      size: 0.07 + rng() * 0.2,
+      spin: (rng() - 0.5) * 10
+    }));
+  }, []);
+  const smokeColumn = useMemo(() => {
+    const rng = makeRng(770003);
+    return Array.from({ length: 22 }).map(() => ({
+      x: (rng() - 0.5) * 0.7,
+      z: (rng() - 0.5) * 0.7,
+      rise: 0.6 + rng() * 1.6,
+      delay: rng() * 1.2,
+      size: 0.4 + rng() * 0.7
+    }));
+  }, []);
+  const fireTrail = useMemo(() => {
+    const rng = makeRng(770004);
+    return Array.from({ length: 16 }).map((_, i) => ({
+      lag: i * 0.045,
+      jitter: (rng() - 0.5) * 0.25,
+      jitterZ: (rng() - 0.5) * 0.25,
+      size: 0.22 + rng() * 0.12
+    }));
+  }, []);
+  const projectileTrail = useMemo(() => {
+    return Array.from({ length: 8 }).map((_, i) => ({
+      lag: i * 0.025,
+      size: 0.14 - i * 0.012
+    }));
+  }, []);
+  // Ojos de buey del OVNI (mismos que UFORadiation)
+  const portholes = useMemo(() => {
+    return Array.from({ length: 8 }).map((_, i) => {
+      const ang = (i / 8) * Math.PI * 2;
+      return { x: Math.cos(ang) * 1.05, z: Math.sin(ang) * 1.05 };
+    });
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+
+    // El OVNI YA está parado cuando arranca esta coreografía (venimos de
+    // UFORadiation, que lo tenía sobrevolando la parcela). Por eso no hay fase
+    // de entrada: el cañón emerge bajo el OVNI ya estacionado.
+    const T_AIM = 1.5, T_FIRE = 2.5, T_IMPACT = 2.65, T_CRASH = 4.5, T_GROUND = 4.7;
+
+    // === POSICIÓN del OVNI ===
+    let ufoX: number, ufoY: number, ufoZ: number;
+    let ufoYaw = 0, ufoTiltZ = 0, ufoTiltX = 0;
+
+    if (t < T_IMPACT) {
+      // Sobrevuelo idéntico al de UFORadiation para que la transición sea sin saltos
+      ufoX = PARK_X + Math.sin(state.clock.elapsedTime * 1.6) * 0.2;
+      ufoY = PARK_Y + Math.sin(state.clock.elapsedTime * 1.6) * 0.18;
+      ufoZ = 0;
+    } else if (t < T_CRASH) {
+      // Caída en arco cuadrático con drift horizontal hacia CRASH_X / CRASH_Z
+      const k = Math.min(1, (t - T_IMPACT) / (T_CRASH - T_IMPACT));
+      ufoX = PARK_X + (CRASH_X - PARK_X) * k;
+      ufoY = PARK_Y + (0.2 - PARK_Y) * (k * k);
+      ufoZ = 0 + CRASH_Z * k;
+      ufoTiltZ = 0.4 + k * 1.4;
+      ufoTiltX = 0.3 + k * 0.9;
+      ufoYaw = (t - T_IMPACT) * 14;
+    } else {
+      // Tumbado en el cráter, asentándose
+      const k = Math.min(1, (t - T_CRASH) / 0.4);
+      ufoX = CRASH_X;
+      ufoY = 0.2 - k * 0.1;
+      ufoZ = CRASH_Z;
+      ufoTiltZ = 1.6;
+      ufoTiltX = 1.1;
+      ufoYaw = (T_CRASH - T_IMPACT) * 14;
+    }
+
+    if (ufoRef.current) {
+      ufoRef.current.position.set(ufoX, ufoY, ufoZ);
+    }
+    if (ufoBodyRef.current) {
+      ufoBodyRef.current.rotation.set(ufoTiltX, ufoYaw, ufoTiltZ);
+    }
+
+    // === CAÑÓN ===
+    // Sube desde y=-2 hasta y=0 en el primer segundo
+    const cannonY = t < 1.0 ? -2 + t * 2 : 0;
+    if (cannonGroupRef.current) {
+      cannonGroupRef.current.position.y = cannonY;
+    }
+
+    // Cabezal apunta al OVNI. Barrel local en +Z; rot.y=yaw, rot.x=-pitch.
+    if (cannonHeadRef.current) {
+      const dx = ufoX - CANNON_BASE_X;
+      const dy = ufoY - (cannonY + 0.5);
+      const dz = ufoZ - CANNON_BASE_Z;
+      const horiz = Math.sqrt(dx * dx + dz * dz);
+      const yaw = Math.atan2(dx, dz);
+      const pitch = Math.atan2(dy, horiz);
+      cannonHeadRef.current.rotation.x = -pitch;
+      cannonHeadRef.current.rotation.y = yaw;
+    }
+
+    // Glow de carga en la boca del cañón
+    if (muzzleGlowRef.current) {
+      const mat = muzzleGlowRef.current.material as THREE.MeshStandardMaterial;
+      const charge = t >= T_AIM && t < T_FIRE ? (t - T_AIM) / (T_FIRE - T_AIM) : 0;
+      mat.emissiveIntensity = 0.3 + charge * 4;
+      const pulse = 1 + Math.sin(t * 28) * 0.15 * charge;
+      muzzleGlowRef.current.scale.setScalar((0.5 + charge * 0.9) * pulse);
+    }
+
+    // Muzzle flash justo al disparar
+    if (muzzleFlashRef.current) {
+      const mat = muzzleFlashRef.current.material as THREE.MeshStandardMaterial;
+      const fireT = t - T_FIRE;
+      const flash = fireT >= 0 && fireT < 0.18 ? 1 - fireT / 0.18 : 0;
+      mat.opacity = flash;
+      muzzleFlashRef.current.scale.setScalar(0.3 + flash * 2.2);
+    }
+    if (muzzleLightRef.current) {
+      const fireT = t - T_FIRE;
+      const flash = fireT >= 0 && fireT < 0.25 ? 1 - fireT / 0.25 : 0;
+      muzzleLightRef.current.position.set(CANNON_BASE_X, cannonY + 1.0, CANNON_BASE_Z);
+      muzzleLightRef.current.intensity = flash * 6;
+    }
+
+    // Proyectil: desde el cañón al OVNI durante T_FIRE → T_IMPACT
+    const SRC_X = CANNON_BASE_X, SRC_Y = cannonY + 1.0, SRC_Z = CANNON_BASE_Z;
+    if (projectileRef.current) {
+      const visible = t >= T_FIRE && t < T_IMPACT;
+      projectileRef.current.visible = visible;
+      if (visible) {
+        const k = (t - T_FIRE) / (T_IMPACT - T_FIRE);
+        projectileRef.current.position.set(
+          SRC_X + (ufoX - SRC_X) * k,
+          SRC_Y + (ufoY - SRC_Y) * k,
+          SRC_Z + (ufoZ - SRC_Z) * k
+        );
+        projectileRef.current.rotation.z = state.clock.elapsedTime * 30;
+      }
+    }
+    if (projectileTrailRef.current) {
+      const visible = t >= T_FIRE && t < T_IMPACT + 0.15;
+      projectileTrailRef.current.visible = visible;
+      projectileTrailRef.current.children.forEach((c, idx) => {
+        const tr = projectileTrail[idx]; if (!tr) return;
+        const k = Math.min(1, Math.max(0, (t - T_FIRE - tr.lag) / (T_IMPACT - T_FIRE)));
+        c.position.set(
+          SRC_X + (ufoX - SRC_X) * k,
+          SRC_Y + (ufoY - SRC_Y) * k,
+          SRC_Z + (ufoZ - SRC_Z) * k
+        );
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = visible ? Math.max(0, 0.9 - idx * 0.1) : 0;
+      });
+    }
+
+    // === EXPLOSIÓN EN EL OVNI ===
+    const setExplosion = (
+      ref: React.RefObject<THREE.Mesh | null>,
+      lifespan: number,
+      startScale: number,
+      endScale: number,
+      maxOpacity: number
+    ) => {
+      if (!ref.current) return;
+      const ht = t - T_IMPACT;
+      const mat = ref.current.material as THREE.MeshStandardMaterial;
+      if (ht >= 0 && ht < lifespan) {
+        ref.current.position.set(ufoX, ufoY, ufoZ);
+        const k = ht / lifespan;
+        ref.current.scale.setScalar(startScale + (endScale - startScale) * k);
+        mat.opacity = (1 - k) * maxOpacity;
+      } else {
+        mat.opacity = 0;
+      }
+    };
+    setExplosion(impactFlashRef, 0.3, 0.5, 7, 1.0);
+    setExplosion(impactFireballRef, 0.7, 1.0, 4.5, 0.9);
+    if (impactShockRef.current) {
+      const ht = t - T_IMPACT;
+      const mat = impactShockRef.current.material as THREE.MeshBasicMaterial;
+      if (ht >= 0 && ht < 0.9) {
+        impactShockRef.current.position.set(ufoX, ufoY, ufoZ);
+        const k = ht / 0.9;
+        impactShockRef.current.scale.setScalar(0.4 + k * 12);
+        mat.opacity = (1 - k) * 0.75;
+      } else {
+        mat.opacity = 0;
+      }
+    }
+    if (shrapnelRef.current) {
+      const ht = t - T_IMPACT;
+      const visible = ht >= 0 && ht < 1.6;
+      shrapnelRef.current.visible = visible;
+      shrapnelRef.current.position.set(ufoX, ufoY, ufoZ);
+      shrapnelRef.current.children.forEach((c, idx) => {
+        const s = shrapnel[idx]; if (!s) return;
+        c.position.set(
+          s.vx * ht,
+          s.vy * ht - 0.5 * 9.8 * ht * ht * 0.3,
+          s.vz * ht
+        );
+        c.rotation.y = ht * s.spin;
+        c.rotation.x = ht * s.spin * 0.7;
+        const mat = ((c as THREE.Mesh).material) as THREE.MeshStandardMaterial;
+        mat.opacity = Math.max(0, 1 - ht / 1.6);
+      });
+    }
+    if (explosionLightRef.current) {
+      const ht = t - T_IMPACT;
+      const visible = ht >= 0 && ht < 0.8;
+      explosionLightRef.current.position.set(ufoX, ufoY, ufoZ);
+      explosionLightRef.current.intensity = visible ? Math.max(0, 1 - ht / 0.8) * 18 : 0;
+    }
+
+    // === FUEGO DURANTE LA CAÍDA ===
+    const isFalling = t >= T_IMPACT && t < T_CRASH;
+    if (ufoFireRef.current) {
+      ufoFireRef.current.visible = isFalling;
+      if (isFalling) {
+        ufoFireRef.current.position.set(ufoX, ufoY - 0.3, ufoZ);
+        const flicker = 0.7 + Math.sin(state.clock.elapsedTime * 25) * 0.3;
+        ufoFireRef.current.scale.setScalar(0.9 + flicker * 0.5);
+      }
+    }
+    if (fireTrailRef.current) {
+      const visible = isFalling;
+      fireTrailRef.current.visible = visible || (t >= T_CRASH && t < T_CRASH + 0.4);
+      fireTrailRef.current.children.forEach((c, idx) => {
+        const ft = fireTrail[idx]; if (!ft) return;
+        const tLag = Math.max(0, Math.min(T_CRASH - T_IMPACT, t - T_IMPACT - ft.lag));
+        const k = tLag / (T_CRASH - T_IMPACT);
+        const tx = PARK_X + (CRASH_X - PARK_X) * k;
+        const ty = PARK_Y + (0.2 - PARK_Y) * (k * k);
+        const tz = 0 + CRASH_Z * k;
+        c.position.set(tx + ft.jitter, ty + 0.2, tz + ft.jitterZ);
+        const mat = ((c as THREE.Mesh).material) as THREE.MeshStandardMaterial;
+        const dist = idx * 0.06;
+        mat.opacity = isFalling ? Math.max(0, 0.85 - dist) : 0;
+        c.scale.setScalar(ft.size * (1 - idx * 0.035));
+      });
+    }
+
+    // === IMPACTO EN SUELO ===
+    if (groundFlashRef.current) {
+      const gt = t - T_CRASH;
+      const mat = groundFlashRef.current.material as THREE.MeshStandardMaterial;
+      if (gt >= 0 && gt < 0.35) {
+        const k = gt / 0.35;
+        groundFlashRef.current.scale.setScalar(0.5 + k * 9);
+        mat.opacity = 1 - k;
+      } else {
+        mat.opacity = 0;
+      }
+    }
+    if (groundFireRef.current) {
+      const gt = t - T_CRASH;
+      const mat = groundFireRef.current.material as THREE.MeshStandardMaterial;
+      if (gt >= 0 && gt < 1.4) {
+        groundFireRef.current.position.y = 0.5 + gt * 0.7;
+        const k = gt / 1.4;
+        groundFireRef.current.scale.setScalar(1.5 + k * 4.5);
+        mat.opacity = (1 - k) * 0.9;
+      } else {
+        mat.opacity = 0;
+      }
+    }
+    if (groundShockRef.current) {
+      const gt = t - T_CRASH;
+      const mat = groundShockRef.current.material as THREE.MeshBasicMaterial;
+      if (gt >= 0 && gt < 1.6) {
+        const k = gt / 1.6;
+        groundShockRef.current.scale.setScalar(0.5 + k * 16);
+        mat.opacity = (1 - k) * 0.8;
+      } else {
+        mat.opacity = 0;
+      }
+    }
+    if (groundShock2Ref.current) {
+      const gt = t - T_CRASH - 0.15;
+      const mat = groundShock2Ref.current.material as THREE.MeshBasicMaterial;
+      if (gt >= 0 && gt < 1.4) {
+        const k = gt / 1.4;
+        groundShock2Ref.current.scale.setScalar(0.4 + k * 12);
+        mat.opacity = (1 - k) * 0.5;
+      } else {
+        mat.opacity = 0;
+      }
+    }
+    if (debrisRef.current) {
+      const gt = t - T_CRASH;
+      const visible = gt >= 0 && gt < 3.0;
+      debrisRef.current.visible = visible;
+      debrisRef.current.children.forEach((c, idx) => {
+        const d = debris[idx]; if (!d) return;
+        c.position.set(
+          d.vx * gt,
+          Math.max(0, d.vy * gt - 0.5 * 9.8 * gt * gt * 0.4),
+          d.vz * gt
+        );
+        c.rotation.y = gt * d.spin;
+        c.rotation.x = gt * d.spin * 0.6;
+      });
+    }
+    if (smokeColumnRef.current) {
+      const gt = t - T_GROUND;
+      const visible = gt >= 0;
+      smokeColumnRef.current.visible = visible;
+      smokeColumnRef.current.children.forEach((c, idx) => {
+        const s = smokeColumn[idx]; if (!s) return;
+        const localT = Math.max(0, gt - s.delay);
+        const y = 0.3 + localT * s.rise;
+        c.position.set(
+          s.x + Math.sin(localT * 0.5 + idx) * 0.15,
+          y,
+          s.z + Math.cos(localT * 0.4 + idx) * 0.15
+        );
+        const mat = ((c as THREE.Mesh).material) as THREE.MeshStandardMaterial;
+        const fadeIn = Math.min(1, localT * 2);
+        const fadeOut = Math.max(0, 1 - localT / 3.0);
+        mat.opacity = fadeIn * fadeOut * 0.5;
+        c.scale.setScalar(s.size * (1 + localT * 0.4));
+      });
+    }
+    if (craterRef.current) {
+      const mat = craterRef.current.material as THREE.MeshBasicMaterial;
+      const gt = t - T_CRASH;
+      mat.opacity = gt >= 0 ? Math.min(1, gt * 4) * 0.85 : 0;
+    }
+    if (fireLightRef.current) {
+      if (isFalling) {
+        fireLightRef.current.position.set(ufoX, ufoY, ufoZ);
+        fireLightRef.current.intensity = 4 + Math.sin(state.clock.elapsedTime * 18) * 1.5;
+      } else if (t >= T_CRASH && t < T_CRASH + 2.5) {
+        fireLightRef.current.position.set(CRASH_X, 0.6, CRASH_Z);
+        const fade = Math.max(0, 1 - (t - T_CRASH) / 2.5);
+        fireLightRef.current.intensity = (4 + Math.sin(state.clock.elapsedTime * 18) * 1.5) * fade;
+      } else {
+        fireLightRef.current.intensity = 0;
+      }
+    }
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* ============ OVNI ============ */}
+      <group ref={ufoRef} position={[PARK_X, PARK_Y, 0]}>
+        <group ref={ufoBodyRef}>
+          <mesh castShadow>
+            <cylinderGeometry args={[1.4, 1.0, 0.32, 24]} />
+            <meshStandardMaterial color="#9aa6b0" metalness={0.85} roughness={0.25} />
+          </mesh>
+          <mesh position={[0, -0.18, 0]}>
+            <cylinderGeometry args={[1.0, 0.85, 0.12, 24]} />
+            <meshStandardMaterial color="#1a1f24" metalness={0.7} roughness={0.3} />
+          </mesh>
+          <mesh position={[0, 0.28, 0]}>
+            <sphereGeometry args={[0.7, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+            <meshStandardMaterial color="#5fffb5" emissive="#5fffb5" emissiveIntensity={0.35} transparent opacity={0.65} metalness={0.2} roughness={0.1} />
+          </mesh>
+          {portholes.map((p, i) => (
+            <mesh key={i} position={[p.x, -0.05, p.z]} scale={0.15}>
+              <sphereGeometry args={[1, 8, 6]} />
+              <meshStandardMaterial color="#caffd6" emissive="#9bff8a" emissiveIntensity={1.4} />
+            </mesh>
+          ))}
+          <mesh position={[0, -0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[1.45, 1.6, 32]} />
+            <meshBasicMaterial color="#a6ff9b" transparent opacity={0.55} side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      </group>
+
+      {/* Fuego que envuelve al OVNI durante la caída */}
+      <mesh ref={ufoFireRef} visible={false}>
+        <sphereGeometry args={[1.1, 12, 10]} />
+        <meshStandardMaterial color="#ff8a18" emissive="#ff3a05" emissiveIntensity={2.2} transparent opacity={0.85} depthWrite={false} />
+      </mesh>
+
+      {/* Estela de fuego de la caída */}
+      <group ref={fireTrailRef}>
+        {fireTrail.map((_, i) => (
+          <mesh key={i}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color={i < 5 ? '#ffe178' : '#ff5a18'} emissive={i < 5 ? '#ffe178' : '#ff3a05'} emissiveIntensity={1.8} transparent opacity={0} depthWrite={false} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* ============ CAÑÓN ============ */}
+      <group ref={cannonGroupRef} position={[CANNON_BASE_X, -2, CANNON_BASE_Z]}>
+        {/* Base hexagonal */}
+        <mesh castShadow position={[0, 0.15, 0]}>
+          <cylinderGeometry args={[0.55, 0.7, 0.3, 6]} />
+          <meshStandardMaterial color="#3a4248" metalness={0.7} roughness={0.4} />
+        </mesh>
+        {/* Patas */}
+        {Array.from({ length: 4 }).map((_, i) => {
+          const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+          return (
+            <mesh key={i} castShadow position={[Math.cos(ang) * 0.55, 0.18, Math.sin(ang) * 0.55]} rotation={[0, -ang, Math.cos(ang) * 0.35]}>
+              <cylinderGeometry args={[0.05, 0.08, 0.45, 6]} />
+              <meshStandardMaterial color="#2a3035" metalness={0.6} roughness={0.5} />
+            </mesh>
+          );
+        })}
+        {/* Yugo */}
+        <mesh castShadow position={[0, 0.42, 0]}>
+          <sphereGeometry args={[0.32, 12, 10]} />
+          <meshStandardMaterial color="#4a525a" metalness={0.8} roughness={0.3} />
+        </mesh>
+        {/* Cabezal pivotante */}
+        <group ref={cannonHeadRef} position={[0, 0.5, 0]}>
+          <mesh castShadow position={[0, 0.05, 0]}>
+            <boxGeometry args={[0.42, 0.36, 0.55]} />
+            <meshStandardMaterial color="#4a525a" metalness={0.8} roughness={0.3} />
+          </mesh>
+          {/* Barril (apuntando +Z local) */}
+          <mesh castShadow position={[0, 0.05, 0.62]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.1, 0.13, 1.1, 12]} />
+            <meshStandardMaterial color="#2a3035" metalness={0.85} roughness={0.25} />
+          </mesh>
+          {/* Brida */}
+          <mesh position={[0, 0.05, 1.05]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.16, 0.16, 0.12, 12]} />
+            <meshStandardMaterial color="#5a626a" metalness={0.9} roughness={0.2} />
+          </mesh>
+          {/* Glow de carga */}
+          <mesh ref={muzzleGlowRef} position={[0, 0.05, 1.18]}>
+            <sphereGeometry args={[0.13, 12, 10]} />
+            <meshStandardMaterial color="#a8efff" emissive="#5fc8ff" emissiveIntensity={0.3} transparent opacity={0.85} depthWrite={false} />
+          </mesh>
+          {/* Muzzle flash */}
+          <mesh ref={muzzleFlashRef} position={[0, 0.05, 1.3]}>
+            <sphereGeometry args={[0.22, 12, 10]} />
+            <meshStandardMaterial color="#ffffff" emissive="#caffff" emissiveIntensity={3.0} transparent opacity={0} depthWrite={false} />
+          </mesh>
+        </group>
+      </group>
+
+      {/* ============ PROYECTIL ============ */}
+      <group ref={projectileRef} visible={false}>
+        <mesh>
+          <sphereGeometry args={[0.15, 12, 10]} />
+          <meshStandardMaterial color="#ffffff" emissive="#aaffff" emissiveIntensity={3} />
+        </mesh>
+        <mesh scale={1.9}>
+          <sphereGeometry args={[0.15, 10, 8]} />
+          <meshStandardMaterial color="#5fc8ff" emissive="#5fc8ff" emissiveIntensity={1.5} transparent opacity={0.5} depthWrite={false} />
+        </mesh>
+      </group>
+      <group ref={projectileTrailRef}>
+        {projectileTrail.map((tr, i) => (
+          <mesh key={i} scale={tr.size}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color="#aaffff" emissive="#5fc8ff" emissiveIntensity={2} transparent opacity={0} depthWrite={false} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* ============ EXPLOSIÓN EN EL OVNI ============ */}
+      <mesh ref={impactFlashRef}>
+        <sphereGeometry args={[1, 14, 10]} />
+        <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={3} transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={impactFireballRef}>
+        <sphereGeometry args={[0.8, 14, 10]} />
+        <meshStandardMaterial color="#ff7a1a" emissive="#ff3a05" emissiveIntensity={2.5} transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={impactShockRef} rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.7, 0.9, 32]} />
+        <meshBasicMaterial color="#ffe178" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <group ref={shrapnelRef} visible={false}>
+        {shrapnel.map((s, i) => (
+          <mesh key={i} scale={s.size}>
+            <boxGeometry args={[1, 1, 1]} />
+            <meshStandardMaterial color="#9aa6b0" emissive="#ff5018" emissiveIntensity={0.5} transparent opacity={1} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* ============ IMPACTO EN EL SUELO ============ */}
+      <mesh ref={groundFlashRef} position={[CRASH_X, 0.3, CRASH_Z]}>
+        <sphereGeometry args={[1, 16, 12]} />
+        <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={3.5} transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={groundFireRef} position={[CRASH_X, 0.5, CRASH_Z]}>
+        <sphereGeometry args={[1.2, 16, 12]} />
+        <meshStandardMaterial color="#ff7a1a" emissive="#ff3a05" emissiveIntensity={2.5} transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <mesh ref={groundShockRef} position={[CRASH_X, 0.05, CRASH_Z]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.7, 0.9, 32]} />
+        <meshBasicMaterial color="#ffd54f" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <mesh ref={groundShock2Ref} position={[CRASH_X, 0.04, CRASH_Z]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.5, 0.7, 32]} />
+        <meshBasicMaterial color="#ff7a1a" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <mesh ref={craterRef} position={[CRASH_X, 0.01, CRASH_Z]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.45, 1.4, 28]} />
+        <meshBasicMaterial color="#1a0805" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+      <group ref={debrisRef} position={[CRASH_X, 0, CRASH_Z]} visible={false}>
+        {debris.map((d, i) => (
+          <mesh key={i} scale={d.size}>
+            <boxGeometry args={[1, 1, 1]} />
+            <meshStandardMaterial color="#3a4248" emissive="#ff5018" emissiveIntensity={0.4} />
+          </mesh>
+        ))}
+      </group>
+      <group ref={smokeColumnRef} position={[CRASH_X, 0, CRASH_Z]} visible={false}>
+        {smokeColumn.map((_, i) => (
+          <mesh key={i}>
+            <sphereGeometry args={[1, 10, 8]} />
+            <meshStandardMaterial color="#3a3530" emissive="#1a1410" emissiveIntensity={0.2} transparent opacity={0} depthWrite={false} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Luces dinámicas */}
+      <pointLight ref={muzzleLightRef} position={[CANNON_BASE_X, 1, CANNON_BASE_Z]} color="#aaffff" distance={9} decay={2} intensity={0} />
+      <pointLight ref={explosionLightRef} position={[0, 5, 0]} color="#ff8a18" distance={18} decay={2} intensity={0} />
+      <pointLight ref={fireLightRef} position={[0, 2, 0]} color="#ff5a18" distance={12} decay={2} intensity={0} />
+    </>
+  );
+};
+
+// ============================================================
+// Bichitos — enjambre 3D que salta/se arrastra por la parcela.
+// Variantes según el tipo de plaga:
+//   - 'pulgones'           → puntitos verdes pequeños, saltitos suaves
+//   - 'arana_roja'         → arañas rojas con 8 patitas, saltos cortos
+//   - 'caracoles'          → caracoles marrones lentos, apenas saltan
+//   - 'langostas'          → langostas grandes verdes/amarillas, saltos altos
+//   - 'marabunta_hormigas' → hormigas negras en fila india
+//   - 'plaga' (genérico)   → bichos marrón-rojizos saltando aleatorio
+// ============================================================
+
+type BugKind = 'pulgones' | 'arana_roja' | 'caracoles' | 'langostas' | 'marabunta_hormigas' | 'plaga';
+
+interface BugSwarmProps {
+  active: boolean;
+  kind: BugKind;
+  durationSec?: number;
+}
+
+const BUG_PRESETS: Record<BugKind, {
+  count: number;
+  color: string;
+  accent: string;
+  bodySize: number;       // radio del cuerpo en unidades de escena
+  hopHeight: number;      // altura del saltito
+  hopSpeed: number;       // saltos por segundo
+  travelSpeed: number;    // velocidad de desplazamiento horizontal
+  legs: number;           // pares de patitas (0 = caracol)
+  shellHump?: boolean;    // concha (caracoles)
+  antennae?: boolean;     // antenas (hormigas / langostas)
+  wings?: boolean;        // alas (langostas)
+}> = {
+  pulgones:           { count: 28, color: '#7fc25a', accent: '#3f7a2a', bodySize: 0.07, hopHeight: 0.15, hopSpeed: 2.5, travelSpeed: 0.4,  legs: 3, antennae: true },
+  arana_roja:         { count: 16, color: '#c83a3a', accent: '#7a1f1f', bodySize: 0.10, hopHeight: 0.18, hopSpeed: 1.7, travelSpeed: 0.55, legs: 4 },
+  caracoles:          { count: 10, color: '#8a6a3f', accent: '#5a4020', bodySize: 0.18, hopHeight: 0.03, hopSpeed: 0.5, travelSpeed: 0.15, legs: 0, shellHump: true, antennae: true },
+  langostas:          { count: 14, color: '#a8b835', accent: '#d4c14a', bodySize: 0.18, hopHeight: 0.85, hopSpeed: 1.2, travelSpeed: 0.8,  legs: 3, antennae: true, wings: true },
+  marabunta_hormigas: { count: 32, color: '#1c1c1c', accent: '#3a2a14', bodySize: 0.08, hopHeight: 0.08, hopSpeed: 3.0, travelSpeed: 0.6,  legs: 3, antennae: true },
+  plaga:              { count: 22, color: '#8a4a2a', accent: '#c25a2a', bodySize: 0.12, hopHeight: 0.35, hopSpeed: 1.8, travelSpeed: 0.5,  legs: 3, antennae: true }
+};
+
+const BugSwarm: React.FC<BugSwarmProps> = ({ active, kind }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const getElapsed = useEffectClock(active);
+  const preset = BUG_PRESETS[kind];
+
+  const bugs = useMemo(() => {
+    // Seed distinta por tipo para que no se vean idénticos al cambiar de plaga
+    const seedBase = ({
+      pulgones: 201,
+      arana_roja: 202,
+      caracoles: 203,
+      langostas: 204,
+      marabunta_hormigas: 205,
+      plaga: 206
+    } as Record<BugKind, number>)[kind] ?? 200;
+    const rng = makeRng(seedBase * 1000 + preset.count);
+
+    // Para hormigas: hacemos una fila india con un camino sinuoso compartido
+    if (kind === 'marabunta_hormigas') {
+      return Array.from({ length: preset.count }).map((_, i) => ({
+        kind: 'ant' as const,
+        offset: i * 0.32,
+        phase: rng() * Math.PI * 2,
+        scale: 0.85 + rng() * 0.3
+      }));
+    }
+
+    return Array.from({ length: preset.count }).map(() => ({
+      kind: 'free' as const,
+      x0: (rng() - 0.5) * 8,
+      z0: (rng() - 0.5) * 8,
+      driftX: (rng() - 0.5) * 2,
+      driftZ: (rng() - 0.5) * 2,
+      hopPhase: rng() * Math.PI * 2,
+      yawPhase: rng() * Math.PI * 2,
+      scale: 0.8 + rng() * 0.5,
+      hopJitter: 0.7 + rng() * 0.6
+    }));
+  }, [kind, preset.count]);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active || !groupRef.current) return;
+    // Solo aparición progresiva — mientras el evento siga activo los bichos se quedan.
+    const lifeMix = Math.min(t / 0.4, 1);
+
+    groupRef.current.children.forEach((bugGroup, i) => {
+      const b = bugs[i] as any; if (!b) return;
+
+      if (b.kind === 'ant') {
+        // Camino compartido: dos vueltas a una elipse en torno al centro
+        const speed = preset.travelSpeed;
+        const u = (state.clock.elapsedTime * speed - b.offset) % (Math.PI * 2);
+        const x = Math.cos(u) * 3.6 + Math.sin(u * 2) * 0.4;
+        const z = Math.sin(u) * 2.8 + Math.cos(u * 3) * 0.3;
+        // Yaw apuntando a la tangente del camino
+        const tx = -Math.sin(u) * 3.6 + Math.cos(u * 2) * 0.8;
+        const tz = Math.cos(u) * 2.8 - Math.sin(u * 3) * 0.9;
+        bugGroup.position.x = x;
+        bugGroup.position.z = z;
+        bugGroup.position.y = Math.abs(Math.sin(state.clock.elapsedTime * preset.hopSpeed + b.phase)) * preset.hopHeight;
+        bugGroup.rotation.y = Math.atan2(tx, tz);
+        bugGroup.scale.setScalar(b.scale * lifeMix);
+        return;
+      }
+
+      // Bichos "free": deriva suave + saltitos
+      const driftT = state.clock.elapsedTime * preset.travelSpeed * 0.35;
+      const x = b.x0 + Math.sin(driftT + b.yawPhase) * b.driftX;
+      const z = b.z0 + Math.cos(driftT + b.yawPhase * 1.3) * b.driftZ;
+      const hop = Math.abs(Math.sin(state.clock.elapsedTime * preset.hopSpeed * b.hopJitter + b.hopPhase));
+      bugGroup.position.set(x, hop * preset.hopHeight, z);
+      bugGroup.rotation.y = Math.sin(driftT * 0.9 + b.yawPhase) * 0.6;
+      bugGroup.scale.setScalar(b.scale * lifeMix);
+    });
+  });
+
+  if (!active) return null;
+
+  // Patitas (segmentos) que sobresalen del cuerpo. Render condicional según preset.legs.
+  const renderLegs = (size: number) => {
+    if (preset.legs <= 0) return null;
+    const items: React.ReactElement[] = [];
+    for (let i = 0; i < preset.legs; i++) {
+      const ang = (i / preset.legs) * Math.PI;
+      const lx = Math.cos(ang) * size * 1.1;
+      const lz = Math.sin(ang) * size * 0.4;
+      const legLen = size * 1.3;
+      items.push(
+        <mesh key={`L${i}`} position={[lx, -size * 0.2, lz]} rotation={[0, 0, Math.PI / 2.2]}>
+          <cylinderGeometry args={[size * 0.06, size * 0.06, legLen, 4]} />
+          <meshStandardMaterial color={preset.accent} />
+        </mesh>
+      );
+      items.push(
+        <mesh key={`R${i}`} position={[-lx, -size * 0.2, lz]} rotation={[0, 0, -Math.PI / 2.2]}>
+          <cylinderGeometry args={[size * 0.06, size * 0.06, legLen, 4]} />
+          <meshStandardMaterial color={preset.accent} />
+        </mesh>
+      );
+    }
+    return items;
+  };
+
+  return (
+    <group ref={groupRef}>
+      {bugs.map((_, i) => {
+        const size = preset.bodySize;
+        return (
+          <group key={i} position={[0, 0, 0]}>
+            {/* Cuerpo principal (elipsoide) */}
+            <mesh castShadow>
+              <sphereGeometry args={[size, 10, 8]} />
+              <meshStandardMaterial color={preset.color} roughness={0.55} />
+            </mesh>
+            {/* Cabeza más oscura */}
+            <mesh position={[0, 0, size * 0.95]}>
+              <sphereGeometry args={[size * 0.7, 10, 8]} />
+              <meshStandardMaterial color={preset.accent} roughness={0.6} />
+            </mesh>
+
+            {/* Concha en caracoles */}
+            {preset.shellHump && (
+              <mesh position={[0, size * 0.55, -size * 0.1]}>
+                <sphereGeometry args={[size * 1.05, 12, 10]} />
+                <meshStandardMaterial color="#c08a4d" roughness={0.45} />
+              </mesh>
+            )}
+
+            {/* Antenas */}
+            {preset.antennae && (
+              <>
+                <mesh position={[size * 0.25, size * 0.7, size * 1.1]} rotation={[0.3, 0.2, 0]}>
+                  <cylinderGeometry args={[size * 0.04, size * 0.04, size * 1.1, 4]} />
+                  <meshStandardMaterial color={preset.accent} />
+                </mesh>
+                <mesh position={[-size * 0.25, size * 0.7, size * 1.1]} rotation={[0.3, -0.2, 0]}>
+                  <cylinderGeometry args={[size * 0.04, size * 0.04, size * 1.1, 4]} />
+                  <meshStandardMaterial color={preset.accent} />
+                </mesh>
+              </>
+            )}
+
+            {/* Alas (langostas): planas y semitransparentes */}
+            {preset.wings && (
+              <>
+                <mesh position={[size * 0.55, size * 0.25, -size * 0.1]} rotation={[0, 0, -0.4]}>
+                  <planeGeometry args={[size * 1.4, size * 0.7]} />
+                  <meshStandardMaterial color="#e5d27a" transparent opacity={0.55} side={THREE.DoubleSide} />
+                </mesh>
+                <mesh position={[-size * 0.55, size * 0.25, -size * 0.1]} rotation={[0, 0, 0.4]}>
+                  <planeGeometry args={[size * 1.4, size * 0.7]} />
+                  <meshStandardMaterial color="#e5d27a" transparent opacity={0.55} side={THREE.DoubleSide} />
+                </mesh>
+              </>
+            )}
+
+            {renderLegs(size)}
+          </group>
+        );
+      })}
+    </group>
+  );
+};
+
+// ============================================================
+// Jabalíes 🐗 — manada realista. Cada jabalí tiene cuerpo de barril,
+// cabeza alargada con hocico, colmillos blancos, orejas triangulares,
+// crin oscura, cola corta y 4 patas que se animan con un walk-cycle
+// simple. Hozan el suelo (bajan la cabeza, lanzan polvo) y de vez
+// en cuando arrancan a correr de un punto a otro.
+// ============================================================
+
+interface BoarSpec {
+  pathSeed: number;
+  size: number;
+  speed: number;
+  phase: number;
+  rootPhase: number;
+}
+
+const Boar: React.FC<{ spec: BoarSpec }> = ({ spec }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const headRef = useRef<THREE.Group>(null);
+  const legRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const dustRef = useRef<THREE.Group>(null);
+
+  const dust = useMemo(() => {
+    const rng = makeRng(spec.pathSeed * 7 + 13);
+    return Array.from({ length: 6 }).map(() => ({
+      angle: rng() * Math.PI * 2,
+      radius: 0.15 + rng() * 0.25,
+      delay: rng() * 0.7,
+      size: 0.06 + rng() * 0.05
+    }));
+  }, [spec.pathSeed]);
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    if (!groupRef.current) return;
+
+    // Camino: elipse irregular alrededor de la parcela (entre fuera y el
+    // borde del cultivo) más jitter sinusoidal.
+    const u = (t * spec.speed + spec.phase) % (Math.PI * 2);
+    const rngOffset = spec.pathSeed * 0.0001;
+    const rx = 4.5 + Math.sin(u * 1.7 + rngOffset) * 0.6;
+    const rz = 3.6 + Math.cos(u * 1.3 + rngOffset) * 0.7;
+    const x = Math.cos(u) * rx;
+    const z = Math.sin(u) * rz;
+
+    // Velocidad instantánea para ajustar yaw y walk-cycle
+    const tx = -Math.sin(u) * rx;
+    const tz = Math.cos(u) * rz;
+    const yaw = Math.atan2(tx, tz);
+
+    // "Hozar" ocasional: cada ~6 s baja la cabeza y se queda quieto 1 s
+    const rootCycle = ((t + spec.rootPhase) % 6) / 6; // 0–1
+    const rooting = rootCycle > 0.55 && rootCycle < 0.72;
+    const rootStrength = rooting ? Math.sin(((rootCycle - 0.55) / 0.17) * Math.PI) : 0;
+
+    // Sprint corto: cada ~9 s acelera (lo simulamos como bob extra)
+    const sprintCycle = ((t + spec.rootPhase * 1.7) % 9) / 9;
+    const sprinting = sprintCycle > 0.30 && sprintCycle < 0.45;
+    const sprintK = sprinting ? Math.sin(((sprintCycle - 0.30) / 0.15) * Math.PI) : 0;
+
+    const moveSpeed = 1 + sprintK * 1.8 - rootStrength * 0.95;
+
+    groupRef.current.position.set(x, 0, z);
+    groupRef.current.rotation.y = yaw;
+    // El cuerpo "rebota" un poquito al andar y se hunde al hozar
+    const bob = Math.abs(Math.sin(t * 9 * moveSpeed + spec.phase)) * 0.04;
+    groupRef.current.position.y = 0.05 + bob - rootStrength * 0.02;
+
+    // Walk-cycle de las 4 patas: pares cruzados (DEL-TR / DEL-TI)
+    legRefs.current.forEach((leg, i) => {
+      if (!leg) return;
+      // i=0 DEL-IZQ, 1 DEL-DER, 2 TR-IZQ, 3 TR-DER
+      const crossPair = (i === 0 || i === 3) ? 0 : Math.PI;
+      leg.rotation.x = Math.sin(t * 9 * moveSpeed + spec.phase + crossPair) * 0.55 - rootStrength * 0.1;
+    });
+
+    // Cabeza: baja al hozar
+    if (headRef.current) {
+      headRef.current.rotation.x = 0.15 + rootStrength * 0.75;
+      headRef.current.position.y = 0.5 - rootStrength * 0.18;
+    }
+
+    // Polvo al hozar: partículas que suben y se desvanecen
+    if (dustRef.current) {
+      dustRef.current.visible = rootStrength > 0.05;
+      dustRef.current.children.forEach((c, i) => {
+        const d = dust[i]; if (!d) return;
+        const local = Math.max(0, rootCycle - 0.55 + d.delay * 0.05);
+        const phase = Math.min(1, local * 6);
+        c.position.set(
+          Math.cos(d.angle) * d.radius * (1 + phase * 1.5),
+          phase * 0.5,
+          Math.sin(d.angle) * d.radius * (1 + phase * 1.5)
+        );
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = (1 - phase) * 0.55 * rootStrength;
+      });
+    }
+  });
+
+  const s = spec.size;
+  // Colores del jabalí: cuerpo gris-marrón con crin más oscura
+  const bodyColor = '#3a2a1f';
+  const bellyColor = '#5a4533';
+  const accent = '#1a0f08';
+  const tusk = '#f4ead5';
+
+  return (
+    <group ref={groupRef} scale={s}>
+      {/* Cuerpo (barril alargado) */}
+      <mesh castShadow position={[0, 0.45, 0]} scale={[0.45, 0.38, 0.75]}>
+        <sphereGeometry args={[1, 14, 10]} />
+        <meshStandardMaterial color={bodyColor} roughness={0.85} />
+      </mesh>
+      {/* Vientre más claro */}
+      <mesh position={[0, 0.30, 0]} scale={[0.42, 0.18, 0.7]}>
+        <sphereGeometry args={[1, 12, 8]} />
+        <meshStandardMaterial color={bellyColor} roughness={0.9} />
+      </mesh>
+      {/* Crin oscura encima del lomo (cresta) */}
+      <mesh position={[0, 0.78, -0.05]} scale={[0.05, 0.12, 0.55]}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color={accent} roughness={0.95} />
+      </mesh>
+
+      {/* Cabeza: cuerpo + hocico cilíndrico */}
+      <group ref={headRef} position={[0, 0.5, 0.55]}>
+        <mesh castShadow scale={[0.32, 0.32, 0.36]}>
+          <sphereGeometry args={[1, 12, 9]} />
+          <meshStandardMaterial color={bodyColor} roughness={0.85} />
+        </mesh>
+        {/* Hocico saliente */}
+        <mesh position={[0, -0.08, 0.34]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.16, 0.18, 0.30, 12]} />
+          <meshStandardMaterial color={accent} roughness={0.9} />
+        </mesh>
+        {/* Hoyitos nariz */}
+        <mesh position={[0.06, -0.05, 0.50]} scale={0.035}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#000" />
+        </mesh>
+        <mesh position={[-0.06, -0.05, 0.50]} scale={0.035}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#000" />
+        </mesh>
+        {/* Colmillos (dos cilindros blancos saliendo del hocico) */}
+        <mesh position={[0.11, -0.13, 0.42]} rotation={[-0.4, 0.2, 0]}>
+          <coneGeometry args={[0.025, 0.18, 8]} />
+          <meshStandardMaterial color={tusk} roughness={0.4} />
+        </mesh>
+        <mesh position={[-0.11, -0.13, 0.42]} rotation={[-0.4, -0.2, 0]}>
+          <coneGeometry args={[0.025, 0.18, 8]} />
+          <meshStandardMaterial color={tusk} roughness={0.4} />
+        </mesh>
+        {/* Ojos pequeños rojizos */}
+        <mesh position={[0.12, 0.08, 0.22]} scale={0.04}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#1a0a0a" emissive="#6a1a1a" emissiveIntensity={0.6} />
+        </mesh>
+        <mesh position={[-0.12, 0.08, 0.22]} scale={0.04}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#1a0a0a" emissive="#6a1a1a" emissiveIntensity={0.6} />
+        </mesh>
+        {/* Orejas triangulares */}
+        <mesh position={[0.18, 0.25, -0.02]} rotation={[0, 0, 0.4]}>
+          <coneGeometry args={[0.08, 0.16, 4]} />
+          <meshStandardMaterial color={accent} roughness={0.9} />
+        </mesh>
+        <mesh position={[-0.18, 0.25, -0.02]} rotation={[0, 0, -0.4]}>
+          <coneGeometry args={[0.08, 0.16, 4]} />
+          <meshStandardMaterial color={accent} roughness={0.9} />
+        </mesh>
+      </group>
+
+      {/* 4 patas: cilindros con pequeño "hoof" más oscuro abajo.
+          Pivote en lo alto para que la rotación X las balancee como columpio. */}
+      {[
+        { x:  0.20, z:  0.40, i: 0 },
+        { x: -0.20, z:  0.40, i: 1 },
+        { x:  0.20, z: -0.40, i: 2 },
+        { x: -0.20, z: -0.40, i: 3 }
+      ].map(({ x, z, i }) => (
+        <group key={i} position={[x, 0.32, z]}>
+          <mesh
+            ref={(el) => { legRefs.current[i] = el; }}
+            position={[0, -0.18, 0]}
+            castShadow
+          >
+            <cylinderGeometry args={[0.07, 0.08, 0.36, 8]} />
+            <meshStandardMaterial color={bodyColor} roughness={0.85} />
+          </mesh>
+          {/* Pezuña */}
+          <mesh position={[0, -0.38, 0]}>
+            <cylinderGeometry args={[0.085, 0.085, 0.05, 8]} />
+            <meshStandardMaterial color={accent} roughness={0.7} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Cola corta enroscada */}
+      <mesh position={[0, 0.55, -0.78]} rotation={[0.3, 0, 0]}>
+        <torusGeometry args={[0.08, 0.025, 6, 14, Math.PI * 1.4]} />
+        <meshStandardMaterial color={accent} roughness={0.9} />
+      </mesh>
+
+      {/* Polvo al hozar */}
+      <group ref={dustRef} position={[0, 0.05, 0.55]} visible={false}>
+        {dust.map((d, i) => (
+          <mesh key={i} scale={d.size}>
+            <sphereGeometry args={[1, 6, 5]} />
+            <meshStandardMaterial color="#a08560" transparent opacity={0} roughness={1} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+};
+
+const BoarHerd: React.FC<{ active: boolean }> = ({ active }) => {
+  const boars = useMemo<BoarSpec[]>(() => {
+    const rng = makeRng(771001);
+    const N = 4;
+    return Array.from({ length: N }).map((_, i) => ({
+      pathSeed: 771001 + i * 137,
+      size: 1.05 + rng() * 0.35,
+      speed: 0.30 + rng() * 0.18,
+      phase: (i / N) * Math.PI * 2 + rng() * 0.5,
+      rootPhase: rng() * 6
+    }));
+  }, []);
+
+  if (!active) return null;
+  return (
+    <>
+      {boars.map((spec, i) => <Boar key={i} spec={spec} />)}
+    </>
+  );
+};
+
+// ============================================================
+// LLUVIA DE METEORITOS ☄️ — 10 rocas ardientes cayendo en
+// secuencia escalonada. Cada meteorito tiene su propio ciclo
+// (caída → impacto → flash + onda + cráter + escombros + humo)
+// y al terminar reaparece arriba para seguir cayendo. El campo
+// se llena de cráteres y la pantalla tiembla y parpadea (CSS).
+// ============================================================
+
+interface MeteorSpec {
+  startAng: number;     // ángulo desde donde entra (en el cielo)
+  impactX: number;
+  impactZ: number;
+  fallSec: number;      // duración de la caída
+  cycleSec: number;     // duración total del ciclo (caída + post)
+  offsetSec: number;    // desfase para que no caigan todos a la vez
+  size: number;
+  craterR: number;
+}
+
+const SingleMeteor: React.FC<{ spec: MeteorSpec; tNow: number }> = ({ spec, tNow }) => {
+  const meteorRef = useRef<THREE.Group>(null);
+  const trailRef = useRef<THREE.Group>(null);
+  const flashRef = useRef<THREE.PointLight>(null);
+  const flashCoreRef = useRef<THREE.Mesh>(null);
+  const shockRef = useRef<THREE.Mesh>(null);
+  const craterRef = useRef<THREE.Mesh>(null);
+  const debrisRef = useRef<THREE.Group>(null);
+  const smokeRef = useRef<THREE.Group>(null);
+
+  const debris = useMemo(() => {
+    const rng = makeRng(881100 + Math.floor(spec.startAng * 1000));
+    return Array.from({ length: 18 }).map(() => ({
+      ang: rng() * Math.PI * 2,
+      r: 0.4 + rng() * 3,
+      vy: 2 + rng() * 5,
+      gravity: 6 + rng() * 3,
+      size: 0.07 + rng() * 0.14,
+      spinPhase: rng() * Math.PI * 2
+    }));
+  }, [spec.startAng]);
+
+  const smoke = useMemo(() => {
+    const rng = makeRng(881200 + Math.floor(spec.startAng * 1000));
+    return Array.from({ length: 10 }).map(() => ({
+      ang: rng() * Math.PI * 2,
+      r: rng() * 1.2,
+      delay: rng() * 0.5,
+      rise: 1.5 + rng() * 1.5,
+      size: 0.22 + rng() * 0.32
+    }));
+  }, [spec.startAng]);
+
+  useFrame((state) => {
+    // Tiempo local del meteorito (ciclo modular)
+    const local = ((tNow - spec.offsetSec) % spec.cycleSec + spec.cycleSec) % spec.cycleSec;
+    const falling = local < spec.fallSec;
+
+    // Origen alto: a 12 unidades en una dirección desde el impacto
+    const dirX = Math.cos(spec.startAng);
+    const dirZ = Math.sin(spec.startAng);
+    const startX = spec.impactX - dirX * 10;
+    const startZ = spec.impactZ - dirZ * 10;
+    const startY = 11;
+
+    if (meteorRef.current) {
+      if (falling) {
+        const k = local / spec.fallSec;
+        meteorRef.current.visible = true;
+        meteorRef.current.position.set(
+          startX + (spec.impactX - startX) * k,
+          startY + (0.2 - startY) * k,
+          startZ + (spec.impactZ - startZ) * k
+        );
+        meteorRef.current.rotation.x = state.clock.elapsedTime * 8;
+        meteorRef.current.rotation.y = state.clock.elapsedTime * 6;
+      } else {
+        meteorRef.current.visible = false;
+      }
+    }
+    if (trailRef.current) {
+      trailRef.current.visible = falling;
+      if (falling) {
+        const k = local / spec.fallSec;
+        trailRef.current.position.set(
+          startX + (spec.impactX - startX) * k,
+          startY + (0.2 - startY) * k,
+          startZ + (spec.impactZ - startZ) * k
+        );
+        // Orientar la estela hacia el origen (dirección opuesta a la caída)
+        trailRef.current.lookAt(startX, startY, startZ);
+      }
+    }
+
+    // Después del impacto
+    const sinceImpact = falling ? -1 : local - spec.fallSec;
+    if (flashRef.current) {
+      flashRef.current.intensity = sinceImpact >= 0 ? 9 * Math.exp(-sinceImpact * 2.6) : 0;
+      flashRef.current.position.set(spec.impactX, 1.2, spec.impactZ);
+    }
+    if (flashCoreRef.current) {
+      flashCoreRef.current.visible = sinceImpact >= 0 && sinceImpact < 0.7;
+      if (flashCoreRef.current.visible) {
+        flashCoreRef.current.position.set(spec.impactX, 0.5, spec.impactZ);
+        flashCoreRef.current.scale.setScalar(0.3 + sinceImpact * 3.8);
+        const mat = flashCoreRef.current.material as THREE.MeshStandardMaterial;
+        mat.opacity = Math.max(0, 1 - sinceImpact * 1.6);
+      }
+    }
+    if (shockRef.current) {
+      shockRef.current.visible = sinceImpact >= 0 && sinceImpact < 2.0;
+      shockRef.current.position.set(spec.impactX, 0.08, spec.impactZ);
+      if (shockRef.current.visible) {
+        shockRef.current.scale.setScalar(0.3 + sinceImpact * 4.5);
+        const mat = shockRef.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = Math.max(0, 0.7 - sinceImpact * 0.4);
+      }
+    }
+    if (craterRef.current) {
+      // El cráter aparece y se queda hasta el final del ciclo
+      craterRef.current.visible = !falling;
+      craterRef.current.position.set(spec.impactX, 0.04, spec.impactZ);
+      const mat = craterRef.current.material as THREE.MeshStandardMaterial;
+      const fadeOut = local > spec.cycleSec - 0.4 ? Math.max(0, (spec.cycleSec - local) / 0.4) : 1;
+      mat.opacity = !falling ? Math.min(1, sinceImpact * 5) * fadeOut : 0;
+    }
+
+    if (debrisRef.current) {
+      debrisRef.current.visible = sinceImpact >= 0 && sinceImpact < 3;
+      debrisRef.current.position.set(spec.impactX, 0, spec.impactZ);
+      debrisRef.current.children.forEach((c, i) => {
+        const d = debris[i]; if (!d) return;
+        const u = Math.max(0, sinceImpact - 0.05);
+        const y = d.vy * u - 0.5 * d.gravity * u * u;
+        c.position.x = Math.cos(d.ang) * d.r * Math.min(1, u * 2);
+        c.position.z = Math.sin(d.ang) * d.r * Math.min(1, u * 2);
+        c.position.y = Math.max(0.1, y + 0.2);
+        c.rotation.x = state.clock.elapsedTime * 5 + d.spinPhase;
+        c.rotation.y = state.clock.elapsedTime * 4 + d.spinPhase;
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = Math.max(0, 1 - u / 2.5);
+      });
+    }
+
+    if (smokeRef.current) {
+      smokeRef.current.visible = !falling;
+      smokeRef.current.position.set(spec.impactX, 0.05, spec.impactZ);
+      smokeRef.current.children.forEach((c, i) => {
+        const s = smoke[i]; if (!s) return;
+        const u = Math.max(0, (sinceImpact - s.delay)) % 2.5;
+        const phase = u / 2.5;
+        c.position.set(
+          Math.cos(s.ang) * s.r * (1 + phase * 0.5),
+          phase * s.rise,
+          Math.sin(s.ang) * s.r * (1 + phase * 0.5)
+        );
+        c.scale.setScalar(s.size * (0.5 + phase * 1.8));
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = (1 - phase) * 0.55;
+      });
+    }
+  });
+
+  return (
+    <>
+      <group ref={meteorRef} scale={spec.size}>
+        <mesh castShadow>
+          <dodecahedronGeometry args={[0.55, 0]} />
+          <meshStandardMaterial color="#4a2814" emissive="#ff5018" emissiveIntensity={0.95} roughness={0.85} />
+        </mesh>
+        <mesh scale={0.7}>
+          <dodecahedronGeometry args={[0.55, 0]} />
+          <meshStandardMaterial color="#ff8c40" emissive="#ffba50" emissiveIntensity={1.4} />
+        </mesh>
+      </group>
+      {/* Estela: cono apuntando hacia el origen (se reorienta cada frame) */}
+      <group ref={trailRef}>
+        <mesh position={[0, 0, 1.6]} scale={[0.45 * spec.size, 0.45 * spec.size, 2.8 * spec.size]}>
+          <coneGeometry args={[1, 1, 10]} />
+          <meshBasicMaterial color="#ff6418" transparent opacity={0.6} />
+        </mesh>
+        <mesh position={[0, 0, 0.9]} scale={[0.22 * spec.size, 0.22 * spec.size, 1.6 * spec.size]}>
+          <coneGeometry args={[1, 1, 10]} />
+          <meshBasicMaterial color="#ffd028" transparent opacity={0.8} />
+        </mesh>
+      </group>
+      <mesh ref={flashCoreRef} visible={false}>
+        <sphereGeometry args={[1, 16, 12]} />
+        <meshStandardMaterial color="#ffffff" emissive="#fff0a0" emissiveIntensity={2.8} transparent opacity={1} />
+      </mesh>
+      <pointLight ref={flashRef} color="#ffc060" intensity={0} distance={22} decay={2} />
+      <mesh ref={shockRef} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.8, 1.0, 48]} />
+        <meshBasicMaterial color="#ffe070" transparent opacity={0.6} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={craterRef} rotation={[-Math.PI / 2, 0, 0]} visible={false} scale={spec.craterR}>
+        <ringGeometry args={[0.4, 1.0, 24]} />
+        <meshStandardMaterial color="#1a0a05" emissive="#5a1f08" emissiveIntensity={0.5} transparent opacity={0} side={THREE.DoubleSide} />
+      </mesh>
+      <group ref={debrisRef} visible={false}>
+        {debris.map((d, i) => (
+          <mesh key={i} scale={d.size}>
+            <dodecahedronGeometry args={[1, 0]} />
+            <meshStandardMaterial color="#4a2814" emissive="#ff5018" emissiveIntensity={0.6} transparent opacity={1} />
+          </mesh>
+        ))}
+      </group>
+      <group ref={smokeRef} visible={false}>
+        {smoke.map((s, i) => (
+          <mesh key={i} scale={s.size}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color="#2a1a0a" transparent opacity={0} roughness={1} />
+          </mesh>
+        ))}
+      </group>
+    </>
+  );
+};
+
+const Meteorite: React.FC<{ active: boolean; durationSec?: number }> = ({ active }) => {
+  const getElapsed = useEffectClock(active);
+  const [tNow, setTNow] = React.useState(0);
+
+  // 10 meteoritos: puntos de impacto en círculos concéntricos sobre la parcela
+  // (~10×10), ángulos de entrada variados y desfases para una cascada continua.
+  const meteors = useMemo<MeteorSpec[]>(() => {
+    const rng = makeRng(771771);
+    const N = 10;
+    return Array.from({ length: N }).map((_, i) => {
+      const ringR = 1.5 + (i % 3) * 1.8;            // 1.5, 3.3, 5.1
+      const ang  = (i / N) * Math.PI * 2 + rng() * 0.6;
+      const impactX = Math.cos(ang) * ringR + (rng() - 0.5) * 0.6;
+      const impactZ = Math.sin(ang) * ringR + (rng() - 0.5) * 0.6;
+      return {
+        startAng: rng() * Math.PI * 2,
+        impactX,
+        impactZ,
+        fallSec: 0.7 + rng() * 0.4,        // ~0.7–1.1 s caída
+        cycleSec: 2.2 + rng() * 0.8,       // ciclo ~2.2–3.0 s
+        offsetSec: (i / N) * 1.8 + rng() * 0.3,
+        size: 0.85 + rng() * 0.6,
+        craterR: 0.7 + rng() * 0.45
+      };
+    });
+  }, []);
+
+  useFrame((state) => {
+    if (!active) return;
+    setTNow(getElapsed(state.clock.elapsedTime));
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Luz ambiente naranja que pulsa con los impactos */}
+      <ambientLight intensity={0.4} color="#ff6020" />
+      {meteors.map((spec, i) => <SingleMeteor key={i} spec={spec} tNow={tNow} />)}
+    </>
+  );
+};
+
+// ============================================================
+// BOMBA NUCLEAR ☢️ — flash cegador en pantalla completa,
+// columna de fuego central, hongo atómico que se expande (tallo +
+// sombrero + nube secundaria), onda de choque visible en el suelo,
+// tierra calcinada negra y resplandor radiactivo verdoso residual.
+// ============================================================
+
+const NuclearBomb: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 9 }) => {
+  const whiteoutRef = useRef<THREE.Mesh>(null);
+  const whiteout2Ref = useRef<THREE.Mesh>(null);
+  const stalkRef = useRef<THREE.Mesh>(null);
+  const cap1Ref = useRef<THREE.Mesh>(null);
+  const cap2Ref = useRef<THREE.Mesh>(null);
+  const cap3Ref = useRef<THREE.Mesh>(null);
+  const fireballRef = useRef<THREE.Mesh>(null);
+  const fireball2Ref = useRef<THREE.Mesh>(null);
+  const shockRef = useRef<THREE.Mesh>(null);
+  const shock2Ref = useRef<THREE.Mesh>(null);
+  const shock3Ref = useRef<THREE.Mesh>(null);
+  const ringRef = useRef<THREE.Mesh>(null);
+  const scorchRef = useRef<THREE.Mesh>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const getElapsed = useEffectClock(active);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+
+    // ===== Whiteout PRIMARIO — cegador, satura 1.3 s y baja lentamente =====
+    let wo: number;
+    if (t < 0.05) wo = t / 0.05;            // sube instantáneo
+    else if (t < 1.4) wo = 1;                // saturado a tope 1.35 s
+    else wo = Math.max(0, 1 - (t - 1.4) * 0.55); // baja en ~1.8 s
+    if (whiteoutRef.current) {
+      const mat = whiteoutRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = wo;
+      whiteoutRef.current.visible = wo > 0.01;
+    }
+    // ===== Whiteout SECUNDARIO — segundo pulso 1 s tras el primero =====
+    let wo2 = 0;
+    if (t > 1.6 && t < 2.8) {
+      const k = (t - 1.6) / 1.2;
+      wo2 = Math.sin(k * Math.PI) * 0.85;
+    }
+    if (whiteout2Ref.current) {
+      const mat = whiteout2Ref.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = wo2;
+      whiteout2Ref.current.visible = wo2 > 0.01;
+    }
+
+    // ===== Bola de fuego — más grande y caliente que antes =====
+    const fbScale = Math.min(t * 3.2, 4.5);
+    const fbHot = Math.max(0, 1 - t * 0.32);
+    if (fireballRef.current) {
+      fireballRef.current.scale.setScalar(fbScale);
+      const mat = fireballRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 1 + fbHot * 4.5;
+      mat.opacity = Math.max(0, 1 - t * 0.13);
+    }
+    // ===== Núcleo blanco interior — pico, luego se enfría a amarillo =====
+    if (fireball2Ref.current) {
+      const k = Math.min(t * 4, 1);
+      fireball2Ref.current.scale.setScalar(Math.min(t * 1.8, 2.0));
+      const mat = fireball2Ref.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.max(0, 1 - t * 0.45);
+      mat.emissiveIntensity = 3 + k * 3;
+    }
+
+    // ===== Tallo del hongo: más alto y rápido =====
+    const stalkProgress = Math.min(1, Math.max(0, (t - 0.3) / 1.6));
+    if (stalkRef.current) {
+      stalkRef.current.visible = stalkProgress > 0.02;
+      stalkRef.current.scale.set(0.95, stalkProgress * 7, 0.95);
+      stalkRef.current.position.y = stalkProgress * 3.5;
+    }
+
+    // ===== Sombrero — más grande, gira más, capas más separadas =====
+    const capProgress = Math.min(1, Math.max(0, (t - 0.8) / 2.0));
+    [cap1Ref, cap2Ref, cap3Ref].forEach((ref, idx) => {
+      if (!ref.current) return;
+      ref.current.visible = capProgress > 0.02;
+      const tier = idx;
+      ref.current.scale.setScalar(1.0 + capProgress * (3.2 + tier * 1.0));
+      ref.current.position.y = 6.5 + tier * 0.8 + capProgress * 1.2 + Math.sin(state.clock.elapsedTime * 0.8 + tier) * 0.15;
+      ref.current.rotation.y = state.clock.elapsedTime * (0.2 + tier * 0.07);
+      const mat = ref.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = 0.9 - tier * 0.2;
+    });
+
+    // ===== TRES ondas de choque escalonadas =====
+    [{ ref: shockRef, delay: 0.0, scaleK: 5.5, opMul: 0.95 },
+     { ref: shock2Ref, delay: 0.35, scaleK: 4.5, opMul: 0.75 },
+     { ref: shock3Ref, delay: 0.85, scaleK: 3.5, opMul: 0.6 }
+    ].forEach(({ ref, delay, scaleK, opMul }) => {
+      const tt = t - delay;
+      if (!ref.current) return;
+      ref.current.visible = tt > 0 && tt < 4;
+      if (ref.current.visible) {
+        ref.current.scale.setScalar(0.5 + tt * scaleK);
+        const mat = ref.current.material as THREE.MeshBasicMaterial;
+        mat.opacity = Math.max(0, opMul - tt * 0.22);
+      }
+    });
+
+    if (ringRef.current) {
+      ringRef.current.visible = t > 0.5 && t < 6;
+      ringRef.current.scale.setScalar(1 + t * 1.6);
+      const mat = ringRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.max(0, 0.65 - t * 0.10);
+    }
+
+    // ===== Suelo calcinado más grande con resplandor radiactivo =====
+    if (scorchRef.current) {
+      scorchRef.current.visible = t > 0.3;
+      const mat = scorchRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.min(0.95, (t - 0.3) * 1.4);
+      // Pulso radiactivo desde el principio
+      mat.emissiveIntensity = 0.4 + (0.5 + Math.sin(state.clock.elapsedTime * 4) * 0.3) * Math.min(1, t / 2);
+    }
+
+    // ===== Luz cegadora — pulsos múltiples =====
+    if (lightRef.current) {
+      const base = Math.max(0, 25 * Math.exp(-t * 0.55));
+      const pulse = t < 2.5 ? Math.abs(Math.sin(state.clock.elapsedTime * 14)) * 8 : 0;
+      lightRef.current.intensity = base + pulse;
+    }
+
+    void durationSec;
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Whiteout PRIMARIO — plano blanco gigante delante de la cámara */}
+      <mesh ref={whiteoutRef} position={[0, 4, 0]} scale={[60, 60, 1]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color="#ffffff" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Whiteout SECUNDARIO — segundo pulso amarillento */}
+      <mesh ref={whiteout2Ref} position={[0, 4, 0]} scale={[60, 60, 1]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial color="#fff8c0" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Bola de fuego principal — más grande */}
+      <mesh ref={fireballRef} position={[0, 1.8, 0]} scale={0}>
+        <sphereGeometry args={[1.4, 28, 22]} />
+        <meshStandardMaterial color="#ffeb70" emissive="#ff7a18" emissiveIntensity={4} transparent opacity={1} />
+      </mesh>
+      {/* Núcleo blanco cegador (interior) */}
+      <mesh ref={fireball2Ref} position={[0, 1.8, 0]} scale={0}>
+        <sphereGeometry args={[1.4, 22, 18]} />
+        <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={5} transparent opacity={1} />
+      </mesh>
+
+      {/* Luz del estallido */}
+      <pointLight ref={lightRef} position={[0, 4, 0]} color="#fff0a0" intensity={0} distance={45} decay={1.6} />
+      <ambientLight intensity={0.6} color="#fff4c0" />
+
+      {/* Tallo del hongo (cilindro grueso ascendente) */}
+      <mesh ref={stalkRef} position={[0, 0, 0]} visible={false}>
+        <cylinderGeometry args={[0.6, 1.05, 1, 20]} />
+        <meshStandardMaterial color="#a07a55" emissive="#ff6018" emissiveIntensity={0.7} transparent opacity={0.92} roughness={0.95} />
+      </mesh>
+
+      {/* Sombrero — 3 capas (ahora más grandes) */}
+      <mesh ref={cap1Ref} position={[0, 6.5, 0]} visible={false}>
+        <sphereGeometry args={[1.7, 20, 14]} />
+        <meshStandardMaterial color="#c8a070" emissive="#ff6018" emissiveIntensity={0.9} transparent opacity={0.9} roughness={0.95} />
+      </mesh>
+      <mesh ref={cap2Ref} position={[0, 7.3, 0]} visible={false}>
+        <sphereGeometry args={[1.5, 18, 14]} />
+        <meshStandardMaterial color="#a07050" emissive="#ff3818" emissiveIntensity={0.6} transparent opacity={0.82} roughness={0.95} />
+      </mesh>
+      <mesh ref={cap3Ref} position={[0, 8.1, 0]} visible={false}>
+        <sphereGeometry args={[1.3, 16, 12]} />
+        <meshStandardMaterial color="#5a3a25" emissive="#3a0808" emissiveIntensity={0.3} transparent opacity={0.7} roughness={1} />
+      </mesh>
+
+      {/* Tres ondas de choque escalonadas */}
+      <mesh ref={shockRef} position={[0, 0.07, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.7, 1.05, 48]} />
+        <meshBasicMaterial color="#fff0a0" transparent opacity={0.9} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={shock2Ref} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.7, 0.95, 48]} />
+        <meshBasicMaterial color="#ffd070" transparent opacity={0.75} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={shock3Ref} position={[0, 0.09, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.7, 0.9, 48]} />
+        <meshBasicMaterial color="#ffa050" transparent opacity={0.55} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={ringRef} position={[0, 0.10, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <ringGeometry args={[0.5, 1.8, 36]} />
+        <meshStandardMaterial color="#b89870" transparent opacity={0.55} roughness={1} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Tierra calcinada con resplandor radiactivo */}
+      <mesh ref={scorchRef} position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]} visible={false}>
+        <circleGeometry args={[8, 56]} />
+        <meshStandardMaterial color="#0a0a08" emissive="#3aff66" emissiveIntensity={0.3} transparent opacity={0} side={THREE.DoubleSide} roughness={1} />
+      </mesh>
+    </>
+  );
+};
+
+// ============================================================
+// ZOMBIES 🧟 — figuras grises-verdosas que emergen del suelo
+// con una mano levantada, se yerguen hasta su altura completa y
+// caminan tambaleándose hacia el centro. Bruma verdosa, manchas
+// de sangre en el suelo y luz ominosa.
+// ============================================================
+
+interface ZombieSpec {
+  startX: number;
+  startZ: number;
+  hue: 'pale' | 'rotten' | 'gray';
+  size: number;
+  emergeDelay: number;
+  walkPhase: number;
+  walkSpeed: number;
+  armPhase: number;
+}
+
+const Zombie: React.FC<{ spec: ZombieSpec; tNow: number }> = ({ spec, tNow }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const leftLegRef = useRef<THREE.Mesh>(null);
+  const rightLegRef = useRef<THREE.Mesh>(null);
+  const leftArmRef = useRef<THREE.Group>(null);
+  const rightArmRef = useRef<THREE.Group>(null);
+  const torsoRef = useRef<THREE.Group>(null);
+
+  // Color base según hue
+  const skin =
+    spec.hue === 'pale' ? '#9aa090'
+    : spec.hue === 'rotten' ? '#6a7a4a'
+    : '#7a7a7a';
+  const accent =
+    spec.hue === 'pale' ? '#4a5040'
+    : spec.hue === 'rotten' ? '#3a4a1a'
+    : '#3a3a3a';
+  const cloth = '#3a2818';
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const t = state.clock.elapsedTime;
+
+    // Emergencia: 0–1.5 s subiendo desde y=-1.4 hasta y=0
+    const since = Math.max(0, tNow - spec.emergeDelay);
+    const emergeP = Math.min(1, since / 1.5);
+    const emergeY = -1.4 + emergeP * 1.4;
+
+    // Después de emerger, camina hacia el centro
+    const walkSince = Math.max(0, since - 1.5);
+    const sxNorm = Math.hypot(spec.startX, spec.startZ) || 1;
+    const dirX = -spec.startX / sxNorm;
+    const dirZ = -spec.startZ / sxNorm;
+    const walkDist = walkSince * spec.walkSpeed;
+    const px = spec.startX + dirX * walkDist;
+    const pz = spec.startZ + dirZ * walkDist;
+    // Lurch (bamboleo lateral)
+    const lurch = Math.sin(t * 3 + spec.walkPhase) * 0.08;
+
+    groupRef.current.position.set(px + lurch, emergeY, pz);
+    groupRef.current.rotation.y = Math.atan2(dirX, dirZ);
+
+    // Walk-cycle (solo cuando ya está fuera)
+    const moving = walkSince > 0;
+    const cycle = Math.sin(t * 4 + spec.walkPhase);
+    if (leftLegRef.current && rightLegRef.current) {
+      leftLegRef.current.rotation.x = moving ? cycle * 0.45 : 0;
+      rightLegRef.current.rotation.x = moving ? -cycle * 0.45 : 0;
+    }
+    // Brazos extendidos hacia delante con leve oscilación
+    if (leftArmRef.current && rightArmRef.current) {
+      const baseArmX = -Math.PI / 2.4;
+      leftArmRef.current.rotation.x = baseArmX + Math.sin(t * 2 + spec.armPhase) * 0.1;
+      rightArmRef.current.rotation.x = baseArmX + Math.sin(t * 2 + spec.armPhase + 1) * 0.1;
+    }
+    // Torso se ladea según el lurch
+    if (torsoRef.current) {
+      torsoRef.current.rotation.z = lurch * 0.6;
+      torsoRef.current.rotation.x = 0.12;
+    }
+  });
+
+  const s = spec.size;
+
+  return (
+    <group ref={groupRef} scale={s}>
+      {/* Sombra/mancha de tierra removida bajo el zombi */}
+      <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.05, 0.35, 16]} />
+        <meshBasicMaterial color="#1a0a08" transparent opacity={0.45} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Piernas: dos cilindros con pivote arriba */}
+      <group position={[0.13, 0.85, 0]}>
+        <mesh ref={leftLegRef} position={[0, -0.42, 0]} castShadow>
+          <cylinderGeometry args={[0.09, 0.10, 0.85, 8]} />
+          <meshStandardMaterial color={cloth} roughness={0.9} />
+        </mesh>
+      </group>
+      <group position={[-0.13, 0.85, 0]}>
+        <mesh ref={rightLegRef} position={[0, -0.42, 0]} castShadow>
+          <cylinderGeometry args={[0.09, 0.10, 0.85, 8]} />
+          <meshStandardMaterial color={cloth} roughness={0.9} />
+        </mesh>
+      </group>
+
+      {/* Torso (con pivote para inclinarse) */}
+      <group ref={torsoRef} position={[0, 1.0, 0]}>
+        <mesh castShadow scale={[0.35, 0.55, 0.22]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color={cloth} roughness={0.9} />
+        </mesh>
+        {/* Camisa rota: parches más claros */}
+        <mesh position={[0.05, -0.18, 0.12]} scale={[0.12, 0.18, 0.02]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#5a4030" roughness={0.95} />
+        </mesh>
+
+        {/* Cabeza — verdosa con ojos rojos y boca oscura */}
+        <mesh position={[0, 0.50, 0]} scale={[0.18, 0.22, 0.20]} castShadow>
+          <sphereGeometry args={[1, 12, 10]} />
+          <meshStandardMaterial color={skin} roughness={0.85} />
+        </mesh>
+        {/* Ojos */}
+        <mesh position={[0.06, 0.53, 0.18]} scale={0.025}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#ff2010" emissive="#ff3020" emissiveIntensity={1.2} />
+        </mesh>
+        <mesh position={[-0.06, 0.53, 0.18]} scale={0.025}>
+          <sphereGeometry args={[1, 6, 6]} />
+          <meshStandardMaterial color="#ff2010" emissive="#ff3020" emissiveIntensity={1.2} />
+        </mesh>
+        {/* Boca oscura entreabierta */}
+        <mesh position={[0, 0.42, 0.20]} scale={[0.07, 0.025, 0.01]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#1a0808" />
+        </mesh>
+        {/* Mancha de sangre en la barbilla */}
+        <mesh position={[0, 0.38, 0.205]} scale={[0.04, 0.03, 0.01]}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial color="#5a0a08" emissive="#3a0606" emissiveIntensity={0.4} />
+        </mesh>
+
+        {/* Brazos extendidos al frente — pivote en hombro */}
+        <group ref={leftArmRef} position={[0.18, 0.18, 0]} rotation={[0, 0, 0.1]}>
+          <mesh position={[0, -0.32, 0.1]} castShadow>
+            <cylinderGeometry args={[0.07, 0.06, 0.55, 8]} />
+            <meshStandardMaterial color={accent} roughness={0.9} />
+          </mesh>
+          {/* Mano */}
+          <mesh position={[0, -0.62, 0.2]} scale={0.07}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color={skin} roughness={0.9} />
+          </mesh>
+        </group>
+        <group ref={rightArmRef} position={[-0.18, 0.18, 0]} rotation={[0, 0, -0.1]}>
+          <mesh position={[0, -0.32, 0.1]} castShadow>
+            <cylinderGeometry args={[0.07, 0.06, 0.55, 8]} />
+            <meshStandardMaterial color={accent} roughness={0.9} />
+          </mesh>
+          <mesh position={[0, -0.62, 0.2]} scale={0.07}>
+            <sphereGeometry args={[1, 8, 6]} />
+            <meshStandardMaterial color={skin} roughness={0.9} />
+          </mesh>
+        </group>
+      </group>
+    </group>
+  );
+};
+
+const ZombieHorde: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 9 }) => {
+  const fogRef = useRef<THREE.Mesh>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const bloodRef = useRef<THREE.Group>(null);
+  const getElapsed = useEffectClock(active);
+  const [tNow, setTNow] = React.useState(0);
+
+  const zombies = useMemo<ZombieSpec[]>(() => {
+    const rng = makeRng(991001);
+    const N = 12;
+    const list: ZombieSpec[] = [];
+    const hues: ZombieSpec['hue'][] = ['pale', 'rotten', 'gray'];
+    for (let i = 0; i < N; i++) {
+      // Distribución en círculo alrededor del centro a r=4..5
+      const ang = (i / N) * Math.PI * 2 + rng() * 0.3;
+      const r = 4 + rng() * 1.2;
+      list.push({
+        startX: Math.cos(ang) * r,
+        startZ: Math.sin(ang) * r,
+        hue: hues[i % 3],
+        size: 0.9 + rng() * 0.3,
+        emergeDelay: rng() * 2.5,
+        walkPhase: rng() * Math.PI * 2,
+        walkSpeed: 0.20 + rng() * 0.10,
+        armPhase: rng() * Math.PI * 2
+      });
+    }
+    return list;
+  }, []);
+
+  const blood = useMemo(() => {
+    const rng = makeRng(991002);
+    return Array.from({ length: 20 }).map(() => ({
+      x: (rng() - 0.5) * 7,
+      z: (rng() - 0.5) * 7,
+      r: 0.15 + rng() * 0.3,
+      delay: rng() * 4
+    }));
+  }, []);
+
+  useFrame((state) => {
+    const t = getElapsed(state.clock.elapsedTime);
+    if (!active) return;
+    setTNow(t);
+    if (fogRef.current) {
+      const mat = fogRef.current.material as THREE.MeshStandardMaterial;
+      mat.opacity = Math.min(0.4, t * 0.15);
+      fogRef.current.rotation.z = state.clock.elapsedTime * 0.05;
+    }
+    if (lightRef.current) {
+      // Pulso ominoso verdoso
+      lightRef.current.intensity = 1.5 + Math.sin(state.clock.elapsedTime * 2) * 0.4;
+    }
+    if (bloodRef.current) {
+      bloodRef.current.children.forEach((c, i) => {
+        const b = blood[i]; if (!b) return;
+        const u = Math.max(0, t - b.delay);
+        const phase = Math.min(1, u * 1.2);
+        c.scale.setScalar(phase);
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        mat.opacity = phase * 0.85;
+      });
+    }
+    void durationSec;
+  });
+
+  if (!active) return null;
+  return (
+    <>
+      {/* Niebla verdosa baja */}
+      <mesh ref={fogRef} position={[0, 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[18, 18]} />
+        <meshStandardMaterial color="#6a8a4a" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+
+      {/* Manchas de sangre en el suelo */}
+      <group ref={bloodRef}>
+        {blood.map((b, i) => (
+          <mesh key={i} position={[b.x, 0.04, b.z]} rotation={[-Math.PI / 2, 0, 0]} scale={0}>
+            <circleGeometry args={[b.r, 12]} />
+            <meshStandardMaterial color="#3a0808" emissive="#1a0303" emissiveIntensity={0.3} transparent opacity={0} side={THREE.DoubleSide} />
+          </mesh>
+        ))}
+      </group>
+
+      {/* Luz ominosa verdosa pulsante */}
+      <pointLight ref={lightRef} position={[0, 3.5, 0]} color="#7aff8a" intensity={1.5} distance={15} decay={2} />
+
+      {/* La horda */}
+      {zombies.map((z, i) => <Zombie key={i} spec={z} tNow={tNow} />)}
+    </>
+  );
+};
+
+// ============================================================
 // Campo (grid de plantas)
 // ============================================================
 
@@ -3365,6 +5529,24 @@ export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, clim
         <Snowfall active={vfxEvent === 'nevada'} durationSec={4} />
         <FogVolume active={vfxEvent === 'niebla_persistente'} />
         <HeavyRain active={vfxEvent === 'lluvia_torrencial'} durationSec={4} />
+        <UFORadiation active={vfxEvent === 'ola_radiacion_uv'} durationSec={7} />
+        <UFOShootDown active={vfxEvent === 'derribar_ovni'} durationSec={7} />
+
+        {/* Enjambres de bichitos — uno por tipo de plaga, con su estilo propio */}
+        <BugSwarm active={vfxEvent === 'plaga'}              kind="plaga"              durationSec={5} />
+        <BugSwarm active={vfxEvent === 'pulgones'}           kind="pulgones"           durationSec={5} />
+        <BugSwarm active={vfxEvent === 'arana_roja'}         kind="arana_roja"         durationSec={5} />
+        <BugSwarm active={vfxEvent === 'caracoles'}          kind="caracoles"          durationSec={5} />
+        <BugSwarm active={vfxEvent === 'langostas'}          kind="langostas"          durationSec={5} />
+        <BugSwarm active={vfxEvent === 'marabunta_hormigas'} kind="marabunta_hormigas" durationSec={5} />
+
+        {/* Manada de jabalíes (modelo realista con walk-cycle y comportamiento) */}
+        <BoarHerd active={vfxEvent === 'jabalies'} />
+
+        {/* DESTRUCCIÓN TOTAL — coreografías catastróficas */}
+        <Meteorite   active={vfxEvent === 'meteorito'}     durationSec={8} />
+        <NuclearBomb active={vfxEvent === 'bomba_nuclear'} durationSec={9} />
+        <ZombieHorde active={vfxEvent === 'zombies'}       durationSec={9} />
 
         <ContactShadows position={[0, 0.01, 0]} opacity={0.35} blur={2.5} far={10} resolution={512} />
 
