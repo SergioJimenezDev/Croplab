@@ -232,7 +232,7 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { tipo: 'viento_fuerte', nombre: 'Viento fuerte', icono: '💨' },
       { tipo: 'terremoto', nombre: 'Terremoto', icono: '🌋' },
       { tipo: 'tornado', nombre: 'Tornado', icono: '🌪️' },
-      { tipo: 'inundacion', nombre: 'Inundación', icono: '🌊' },
+      { tipo: 'inundacion', nombre: 'Tsunami', icono: '🌊' },
       { tipo: 'nevada', nombre: 'Nevada', icono: '🌨️' },
       { tipo: 'rayo_caido', nombre: 'Rayo', icono: '⚡' },
       { tipo: 'incendio_proximo', nombre: 'Incendio próximo', icono: '🔥' },
@@ -459,8 +459,29 @@ const SimulationView: React.FC = () => {
     }
   }, [eventos]);
 
+  // Eventos cuya secuela visual (plantas espachurradas, suelo inundado,
+  // restos del OVNI estrellado, nieve en el terreno...) debe quedarse en pantalla
+  // hasta que el jugador avance día o aplique la acción correctora. NO incluimos
+  // acciones de manejo (riego, poda...) ni plagas (sus bichitos ya se van solos).
+  const EVENTOS_CON_AFTERMATH = React.useRef(new Set<string>([
+    'inundacion', 'incendio_proximo', 'tornado', 'granizo', 'terremoto',
+    'rayo_caido', 'nevada', 'helada', 'viento_fuerte', 'lluvia_torrencial',
+    'lluvia_acida', 'derribar_ovni',
+    'meteorito', 'bomba_nuclear', 'zombies'
+  ])).current;
+
+  const [aftermathVfx, setAftermathVfx] = useState<VFXEffect | null>(null);
+
   const handleVfxFinish = () => {
+    // Al terminar el flash, si el efecto era destructivo, lo dejamos cocinado
+    // en `aftermathVfx`. La escena 3D seguirá viéndolo (plantas espachurradas,
+    // OVNI estrellado, etc.) pero las partículas 2D de EventVFX paran porque
+    // ese consumidor sólo mira flashVFX ?? baseVFX.
+    const just = flashVFX;
     setFlashVFX(null);
+    if (just && EVENTOS_CON_AFTERMATH.has(just)) {
+      setAftermathVfx(just);
+    }
   };
 
   const loadSimulationData = async () => {
@@ -504,6 +525,8 @@ const SimulationView: React.FC = () => {
     // timer interno de 4 s sigue corriendo y las partículas/efectos del
     // evento ya pasado se ven durante un par de segundos en el día nuevo.
     setFlashVFX(null);
+    // Avanzar día también limpia el aftermath: amanece "página en blanco".
+    setAftermathVfx(null);
     try {
       const nuevoEstado = await simulacionService.avanzarDia(parseInt(id));
       await loadSimulationData();
@@ -519,6 +542,7 @@ const SimulationView: React.FC = () => {
 
     setIsAdvancing(true);
     setFlashVFX(null);
+    setAftermathVfx(null);
     try {
       // Una sola petición HTTP en lugar de N (evita el cold start + latencia × N)
       await simulacionService.avanzarVariosDias(parseInt(id), dias);
@@ -772,7 +796,12 @@ const SimulationView: React.FC = () => {
   const eventosActivosNow = eventosActivosMemo;
   const baseVFX: VFXEffect | null = baseVFXMemo;
   // El flash temporal tiene prioridad; cuando termina, vuelve el base (o null).
+  // currentVFX = lo que se ve en el HUD 2D (partículas, lluvia, granizo...).
+  // sceneVFX = lo que se le pasa a la escena 3D — incluye aftermath para que
+  // las plantas y los efectos persistan tras terminar el flash, hasta que el
+  // jugador avance día o aplique la acción correctora.
   const currentVFX: VFXEffect | null = flashVFX ?? baseVFX;
+  const sceneVFX: VFXEffect | null = currentVFX ?? aftermathVfx;
   // Algunos eventos llevan una coreografía 3D más larga (rayos múltiples,
   // terremoto con sacudida sostenida...) y necesitan más tiempo de flash
   // para que la animación termine antes de que se desactive.
@@ -815,7 +844,7 @@ const SimulationView: React.FC = () => {
         <Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#cfe7ff', color: '#1c2421', fontFamily: 'var(--font-hand, sans-serif)', fontSize: '1.5rem' }}>Cargando escena…</div>}>
           <FarmScene
             simulacion={simulacion}
-            vfxEvent={currentVFX}
+            vfxEvent={sceneVFX}
             clima={climaEscena}
             eventosActivos={eventosBanderitas}
             hasMallas={tieneMallas}

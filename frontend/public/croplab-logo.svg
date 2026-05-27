@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Fondo redondeado en verde marca -->
+  <rect width="32" height="32" rx="7" fill="#5fae45"/>
+  <!-- Tallo central -->
+  <path d="M 16 27 L 16 16" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+  <!-- Hoja izquierda — gota curvada saliendo del tallo -->
+  <path d="M 16 16 C 12 15 8.5 12 7.5 7 C 12 8 15.5 11 16 16 Z" fill="#ffffff"/>
+  <!-- Hoja derecha — espejo de la izquierda -->
+  <path d="M 16 16 C 20 15 23.5 12 24.5 7 C 20 8 16.5 11 16 16 Z" fill="#ffffff"/>
+  <!-- Pequeño brote en la cima del tallo -->
+  <circle cx="16" cy="14" r="1.2" fill="#ffffff"/>
+</svg>

@@ -527,59 +527,235 @@ const createEmojiFlagTexture = (emoji: string, bgColor = '#fff4cc'): THREE.Textu
 };
 
 const Terrain: React.FC<TerrainProps> = ({ humedad, tipoSuelo, size }) => {
+  const wetness = Math.max(0, Math.min(1, humedad / 100));
+  const baseColor = useMemo(() => sueloColorBase(tipoSuelo), [tipoSuelo]);
+  // Suelo húmedo: oscurece y aumenta saturación. Lerp suave por 0..1.
   const color = useMemo(() => {
-    const base = sueloColorBase(tipoSuelo);
-    const t = Math.max(0, Math.min(1, humedad / 100));
-    const wet = base.clone().multiplyScalar(0.5);
-    return base.clone().lerp(wet, t * 0.7);
-  }, [humedad, tipoSuelo]);
+    const wet = baseColor.clone().multiplyScalar(0.45);
+    return baseColor.clone().lerp(wet, wetness * 0.75);
+  }, [baseColor, wetness]);
 
+  // === Suelo con noise multi-octava + vertex colors variados ===
+  // El multi-octava combina ondulaciones largas (lomas suaves) con ruido fino
+  // (pequeños baches), produciendo un terreno mucho menos plástico que el
+  // ruido uniforme original. Cada vértice también lleva un tono ligeramente
+  // distinto para romper la uniformidad del color base.
   const geometry = useMemo(() => {
-    const g = new THREE.PlaneGeometry(size, size, 24, 24);
+    const seg = 56;
+    const g = new THREE.PlaneGeometry(size, size, seg, seg);
     const pos = g.attributes.position;
     const rng = makeRng(98765);
+    const colors = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
-      pos.setZ(i, (rng() - 0.5) * 0.06);
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const lowFreq = Math.sin(x * 0.8 + 1.3) * Math.cos(y * 0.7 - 0.4) * 0.08;
+      const midFreq = Math.sin(x * 2.1 - 0.6) * Math.cos(y * 1.9 + 1.4) * 0.035;
+      const grain   = (rng() - 0.5) * 0.04;
+      pos.setZ(i, lowFreq + midFreq + grain);
+      const cVar = 0.82 + rng() * 0.36;
+      const c = color.clone().multiplyScalar(cVar);
+      colors[i * 3]     = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
     }
+    g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     g.computeVertexNormals();
     return g;
-  }, [size]);
+  }, [size, color]);
 
-  const surcos = useMemo(() => {
+  // === Caballones: lomos de tierra sobre los que crece el cultivo ===
+  // Cada caballón es un trapecio alargado a lo largo del eje X con un surco
+  // ligeramente hundido al lado, que crea sombra natural por contraste de color.
+  const caballones = useMemo(() => {
     const lines: number[] = [];
-    const step = 0.6;
-    for (let i = -size / 2 + step; i < size / 2; i += step) lines.push(i);
+    const step = 0.85;
+    for (let z = -size / 2 + step * 0.6; z < size / 2 - 0.2; z += step) lines.push(z);
     return lines;
   }, [size]);
 
+  // === Piedras dispersas — dodecaedros pequeños rotados aleatoriamente ===
+  const stones = useMemo(() => {
+    const rng = makeRng(13371);
+    return Array.from({ length: 26 }).map(() => ({
+      x: (rng() - 0.5) * (size - 0.8),
+      z: (rng() - 0.5) * (size - 0.8),
+      r: 0.04 + rng() * 0.09,
+      rotX: rng() * Math.PI,
+      rotY: rng() * Math.PI,
+      rotZ: rng() * Math.PI,
+      shade: 0.5 + rng() * 0.4
+    }));
+  }, [size]);
+
+  // === Terrones de tierra removida — pequeños bloques deformes ===
+  const clods = useMemo(() => {
+    const rng = makeRng(13373);
+    return Array.from({ length: 20 }).map(() => ({
+      x: (rng() - 0.5) * (size - 0.8),
+      z: (rng() - 0.5) * (size - 0.8),
+      sx: 0.07 + rng() * 0.11,
+      sy: 0.035 + rng() * 0.045,
+      sz: 0.07 + rng() * 0.11,
+      rotY: rng() * Math.PI,
+      shade: 0.7 + rng() * 0.45
+    }));
+  }, [size]);
+
+  // === Charcas — solo aparecen cuando la humedad pasa de ~60% ===
+  const puddles = useMemo(() => {
+    const rng = makeRng(13372);
+    return Array.from({ length: 7 }).map(() => ({
+      x: (rng() - 0.5) * (size - 1.5),
+      z: (rng() - 0.5) * (size - 1.5),
+      r: 0.18 + rng() * 0.25,
+      tilt: (rng() - 0.5) * 0.12
+    }));
+  }, [size]);
+  const puddleOpacity = Math.max(0, (wetness - 0.55) / 0.35);
+
+  // === Bordes de madera: dos tablones por lado, ligeramente teñidos distintos ===
+  const planks = useMemo(() => {
+    const rng = makeRng(2424);
+    return Array.from({ length: 4 }).map(() => ({
+      tone1: 0.85 + rng() * 0.3,
+      tone2: 0.75 + rng() * 0.3
+    }));
+  }, []);
+  const woodBase = new THREE.Color('#5a3a18');
+
   return (
     <group>
+      {/* Suelo base con vertex colors y ligero metalness cuando está mojado */}
       <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} geometry={geometry}>
-        <meshStandardMaterial color={color} roughness={0.95} />
+        <meshStandardMaterial
+          vertexColors
+          roughness={0.95 - wetness * 0.25}
+          metalness={wetness * 0.12}
+        />
       </mesh>
-      {surcos.map((z, i) => (
-        <mesh key={i} position={[0, 0.02, z]} receiveShadow>
-          <boxGeometry args={[size - 0.4, 0.04, 0.08]} />
-          <meshStandardMaterial color={color.clone().multiplyScalar(0.75)} roughness={0.9} />
+
+      {/* Caballones (lomos de tierra) + surcos a su lado para crear surcado en relieve */}
+      {caballones.map((z, i) => (
+        <group key={`caba-${i}`} position={[0, 0, z]}>
+          {/* Lomo trapezoidal, ligeramente más claro */}
+          <mesh position={[0, 0.045, 0]} receiveShadow castShadow>
+            <boxGeometry args={[size - 0.5, 0.09, 0.24]} />
+            <meshStandardMaterial color={color.clone().multiplyScalar(1.08)} roughness={0.95} />
+          </mesh>
+          {/* Surco hundido (más oscuro = sombra natural) al sur del lomo */}
+          <mesh position={[0, 0.008, 0.32]} receiveShadow>
+            <boxGeometry args={[size - 0.5, 0.012, 0.36]} />
+            <meshStandardMaterial color={color.clone().multiplyScalar(0.6)} roughness={0.95} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Piedras dispersas */}
+      {stones.map((s, i) => (
+        <mesh
+          key={`stone-${i}`}
+          position={[s.x, s.r * 0.55, s.z]}
+          rotation={[s.rotX, s.rotY, s.rotZ]}
+          castShadow
+          receiveShadow
+        >
+          <dodecahedronGeometry args={[s.r, 0]} />
+          <meshStandardMaterial
+            color={new THREE.Color('#8c857a').multiplyScalar(s.shade)}
+            roughness={0.85}
+          />
         </mesh>
       ))}
-      {/* Bordes */}
-      <mesh position={[0, 0.06, size / 2 - 0.04]}>
-        <boxGeometry args={[size, 0.12, 0.06]} />
-        <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
-      </mesh>
-      <mesh position={[0, 0.06, -size / 2 + 0.04]}>
-        <boxGeometry args={[size, 0.12, 0.06]} />
-        <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
-      </mesh>
-      <mesh position={[size / 2 - 0.04, 0.06, 0]}>
-        <boxGeometry args={[0.06, 0.12, size]} />
-        <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
-      </mesh>
-      <mesh position={[-size / 2 + 0.04, 0.06, 0]}>
-        <boxGeometry args={[0.06, 0.12, size]} />
-        <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
-      </mesh>
+
+      {/* Terrones de tierra removida */}
+      {clods.map((c, i) => (
+        <mesh
+          key={`clod-${i}`}
+          position={[c.x, c.sy * 0.5, c.z]}
+          rotation={[0, c.rotY, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[c.sx, c.sy, c.sz]} />
+          <meshStandardMaterial color={color.clone().multiplyScalar(c.shade)} roughness={0.95} />
+        </mesh>
+      ))}
+
+      {/* Charcas — discos brillantes en zonas bajas cuando humedad > 60% */}
+      {puddleOpacity > 0 && puddles.map((p, i) => (
+        <mesh
+          key={`puddle-${i}`}
+          position={[p.x, 0.014, p.z]}
+          rotation={[-Math.PI / 2, p.tilt, 0]}
+        >
+          <circleGeometry args={[p.r, 18]} />
+          <meshStandardMaterial
+            color="#2a3a48"
+            transparent
+            opacity={puddleOpacity * 0.65}
+            roughness={0.12}
+            metalness={0.35}
+          />
+        </mesh>
+      ))}
+
+      {/* === BORDES de madera: dos tablones apilados por lado === */}
+      {/* Tablón inferior (más grueso, más oscuro) + superior (más estrecho, más claro) */}
+      {[
+        { axis: 'x' as const, z:  size / 2 - 0.045, idx: 0 },
+        { axis: 'x' as const, z: -size / 2 + 0.045, idx: 1 },
+        { axis: 'z' as const, x:  size / 2 - 0.045, idx: 2 },
+        { axis: 'z' as const, x: -size / 2 + 0.045, idx: 3 }
+      ].map((b) => {
+        const dim: [number, number, number] = b.axis === 'x'
+          ? [size, 0.09, 0.09]
+          : [0.09, 0.09, size];
+        const dimTop: [number, number, number] = b.axis === 'x'
+          ? [size + 0.04, 0.05, 0.075]
+          : [0.075, 0.05, size + 0.04];
+        const pos: [number, number, number] = b.axis === 'x' ? [0, 0.05, b.z!] : [b.x!, 0.05, 0];
+        const posTop: [number, number, number] = b.axis === 'x' ? [0, 0.13, b.z!] : [b.x!, 0.13, 0];
+        return (
+          <group key={`border-${b.idx}`}>
+            <mesh position={pos} castShadow receiveShadow>
+              <boxGeometry args={dim} />
+              <meshStandardMaterial
+                color={woodBase.clone().multiplyScalar(planks[b.idx].tone1 * 0.85)}
+                roughness={0.92}
+              />
+            </mesh>
+            <mesh position={posTop} castShadow receiveShadow>
+              <boxGeometry args={dimTop} />
+              <meshStandardMaterial
+                color={woodBase.clone().multiplyScalar(planks[b.idx].tone2)}
+                roughness={0.9}
+              />
+            </mesh>
+          </group>
+        );
+      })}
+
+      {/* Postes de esquina más altos — dan sensación de marco */}
+      {[
+        [ size / 2 - 0.05,  size / 2 - 0.05],
+        [ size / 2 - 0.05, -size / 2 + 0.05],
+        [-size / 2 + 0.05,  size / 2 - 0.05],
+        [-size / 2 + 0.05, -size / 2 + 0.05]
+      ].map(([x, z], i) => (
+        <group key={`corner-${i}`} position={[x, 0, z]}>
+          {/* Poste central */}
+          <mesh position={[0, 0.20, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.16, 0.40, 0.16]} />
+            <meshStandardMaterial color={woodBase.clone().multiplyScalar(0.7)} roughness={0.95} />
+          </mesh>
+          {/* Tapa superior (más oscura, como punta quemada) */}
+          <mesh position={[0, 0.42, 0]} castShadow>
+            <boxGeometry args={[0.19, 0.04, 0.19]} />
+            <meshStandardMaterial color="#2a1810" roughness={0.95} />
+          </mesh>
+        </group>
+      ))}
       {/* El suelo "papel cuadriculado" alrededor de la parcela lo dibuja el componente
           <PaperRoom> (suelo + paredes + techo), así toda la escena queda dentro de un
           cubo de papel uniforme. */}
@@ -1363,8 +1539,6 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
   const wallRef = useRef<THREE.Group>(null);
   const floodRef = useRef<THREE.Mesh>(null);
   const sprayRef = useRef<THREE.Group>(null);
-  const mistRef = useRef<THREE.Mesh>(null);
-  const mistFrontRef = useRef<THREE.Mesh>(null);
   const debrisRef = useRef<THREE.Group>(null);
   const foamRefs = useRef<(THREE.Mesh | null)[]>([]);
   const rippleRefs = useRef<(THREE.Mesh | null)[]>([]);
@@ -1443,8 +1617,6 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
       startTimeRef.current = null;
       if (wallRef.current) wallRef.current.position.z = -17;
       if (floodRef.current) (floodRef.current.material as THREE.MeshStandardMaterial).opacity = 0;
-      if (mistRef.current) (mistRef.current.material as THREE.MeshStandardMaterial).opacity = 0;
-      if (mistFrontRef.current) (mistFrontRef.current.material as THREE.MeshStandardMaterial).opacity = 0;
       rippleRefs.current.forEach(r => {
         if (r) (r.material as THREE.MeshStandardMaterial).opacity = 0;
       });
@@ -1483,25 +1655,28 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
       mesh.position.y = f.y + Math.sin(ct * f.wobbleSpeed + f.wobblePhase) * 0.13;
     });
 
-    // Inundación: pico en t=0.5 (subida) y se sostiene hasta t=0.85 antes de bajar
+    // Inundación: sube en los primeros 0.45 (= 45% de la duración) y se queda
+    // a tope durante el resto. Sin fadeout al final → cuando el evento entra en
+    // aftermath (active sigue true), el agua sigue cubriendo la parcela hasta
+    // que el jugador avance día.
     if (floodRef.current) {
-      const rise = Math.min(1, t / 0.45);
-      const fade = t < 0.85 ? 1 : Math.max(0, 1 - (t - 0.85) / 0.15);
-      const flood = rise * fade;
+      const flood = Math.min(1, t / 0.45);
       const mat = floodRef.current.material as THREE.MeshStandardMaterial;
       mat.opacity = flood * 0.85;
       floodRef.current.position.y = 0.05 + flood * 0.42;
     }
 
-    // Ondas concéntricas sobre la inundación — 5 anillos expandiéndose
+    // Ondas concéntricas sobre la inundación — 5 anillos expandiéndose.
+    // Cada anillo es cíclico → siguen apareciendo mientras el componente esté
+    // activo (incluido en aftermath, hasta que el jugador avance día).
     rippleRefs.current.forEach((mesh, idx) => {
       if (!mesh) return;
       const ripT = ((ct * 0.45 + idx * 0.2) % 1);
       const s = 0.5 + ripT * 14;
       mesh.scale.set(s, 1, s);
-      const fade = t < 0.85 ? Math.min(1, t * 2) : Math.max(0, 1 - (t - 0.85) / 0.15);
+      const fadeIn = Math.min(1, t * 2);
       const mat = mesh.material as THREE.MeshStandardMaterial;
-      mat.opacity = Math.max(0, (1 - ripT) * 0.55 * fade);
+      mat.opacity = Math.max(0, (1 - ripT) * 0.55 * fadeIn);
     });
 
     // Spray parabólico — cada gota vive un ciclo distinto, lanzada hacia delante
@@ -1520,22 +1695,6 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
       });
     }
 
-    // Niebla trasera siguiendo a la ola
-    const fadeIn = Math.min(1, t * 3);
-    const fadeOut = Math.max(0, 1 - (t - 0.85) / 0.15);
-    const mistOpacity = 0.32 * fadeIn * fadeOut;
-    if (mistRef.current) {
-      mistRef.current.position.z = wallZ - 2.8;
-      const mat = mistRef.current.material as THREE.MeshStandardMaterial;
-      mat.opacity = mistOpacity + Math.sin(ct * 3) * 0.04;
-    }
-    // Niebla frontal (spray ambiental delante)
-    if (mistFrontRef.current) {
-      mistFrontRef.current.position.z = wallZ + 1.6;
-      const mat = mistFrontRef.current.material as THREE.MeshStandardMaterial;
-      mat.opacity = mistOpacity * 0.55 + Math.sin(ct * 4.2) * 0.03;
-    }
-
     // Escombros — flotan con leve bobbing y giro
     if (debrisRef.current) {
       debrisRef.current.children.forEach((c, i) => {
@@ -1546,6 +1705,7 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
         c.rotation.y = d.rotY + ct * 0.3;
       });
     }
+
   });
 
   if (!active) return null;
@@ -1579,53 +1739,9 @@ const TsunamiWave: React.FC<TsunamiWaveProps> = ({ active, durationSec = 5 }) =>
         </mesh>
       ))}
 
-      {/* Niebla trasera — plano translúcido grande detrás de la ola */}
-      <mesh ref={mistRef} position={[0, 2.4, -3]}>
-        <planeGeometry args={[22, 6]} />
-        <meshStandardMaterial color="#d8e6f4" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-      {/* Niebla frontal — bruma de spray ambiental delante */}
-      <mesh ref={mistFrontRef} position={[0, 1.7, 2]}>
-        <planeGeometry args={[20, 4]} />
-        <meshStandardMaterial color="#ebf3fa" transparent opacity={0} side={THREE.DoubleSide} depthWrite={false} />
-      </mesh>
-
-      {/* Pared de tsunami — capas de agua + labio + foam + escombros */}
+      {/* Pared de tsunami — sin capas planas; el cuerpo lo forman los cilindros
+          de la cresta + el labio rompiendo + espumas + escombros + spray. */}
       <group ref={wallRef} position={[0, 0, -17]}>
-        {/* Cuerpo principal — más alto y profundo, color casi negro azulado */}
-        <mesh position={[0, 1.4, 0]} castShadow>
-          <boxGeometry args={[16.5, 2.8, 1.2]} />
-          <meshStandardMaterial
-            color="#062235"
-            roughness={0.18}
-            metalness={0.62}
-            transparent
-            opacity={0.82}
-          />
-        </mesh>
-        {/* Capa intermedia (azul medio) para profundidad cristalina */}
-        <mesh position={[0, 1.05, 0.32]}>
-          <boxGeometry args={[16, 2.0, 0.7]} />
-          <meshStandardMaterial
-            color="#0f4a78"
-            roughness={0.13}
-            metalness={0.58}
-            transparent
-            opacity={0.78}
-          />
-        </mesh>
-        {/* Capa frontal (azul claro) — efecto de luz pasando por el agua */}
-        <mesh position={[0, 0.78, 0.55]}>
-          <boxGeometry args={[16, 1.5, 0.42]} />
-          <meshStandardMaterial
-            color="#1e7ab2"
-            roughness={0.1}
-            metalness={0.5}
-            transparent
-            opacity={0.7}
-          />
-        </mesh>
-
         {/* Cresta principal — cilindro largo (el "labio" base) */}
         <mesh position={[0, 2.65, 0.32]} rotation={[0, 0, Math.PI / 2]} castShadow>
           <cylinderGeometry args={[0.6, 0.6, 16.5, 20, 1, true]} />
@@ -2021,54 +2137,254 @@ const Tornado: React.FC<{ active: boolean; durationSec?: number }> = ({ active, 
 };
 
 // ============================================================
-// Incendio — llamas + humo
+// Incendio próximo — sistema de fuego realista:
+//   • Muro de llamas en el borde sur de la parcela (12 columnas solapadas
+//     con troncos carbonizados, llamas multicapa y resplandor en el suelo).
+//   • Brasas flotantes que suben en bucle y se desplazan con "viento".
+//   • Humo denso multicapa que sale del muro y se eleva curvándose.
+//   • 4 luces puntuales parpadeantes con flicker temporal individual.
+//   • Resplandor anaranjado tenue que sube hasta el cielo.
+//
+// Diseño pensado para que, en aftermath, todo siga vivo indefinidamente:
+//   las brasas y el humo son cíclicos, las llamas usan senos infinitos.
 // ============================================================
 
 const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
-  const flameRefs = useRef<THREE.Group[]>([]);
+  const flameInnerRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const flameMidRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const flameOuterRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const flameHaloRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const glowRingRefs = useRef<(THREE.Mesh | null)[]>([]);
+  const embersRef = useRef<THREE.Group>(null);
   const smokeRef = useRef<THREE.Group>(null);
+  const groundGlowRef = useRef<THREE.Mesh>(null);
+  const fireLightRefs = useRef<(THREE.PointLight | null)[]>([]);
   const getElapsed = useEffectClock(active);
 
+  // === ~20 columnas de fuego: 16 en anillo perimetral + 4-5 dentro ===
+  // El anillo rodea la parcela (radio ~4.8) con leve jitter; las internas
+  // son focos dispersos dentro del cultivo. Cada llama tiene flicker propio.
   const flames = useMemo(() => {
     const rng = makeRng(55001);
-    return Array.from({ length: 8 }).map(() => ({
-      x: (rng() - 0.5) * 8,
-      z: (rng() - 0.5) * 8,
-      scale: 0.6 + rng() * 0.7,
+    const PERIMETRO = 16;
+    const INTERNAS = 5;
+    const list: Array<{
+      x: number; z: number; scale: number;
+      flickerSpeed: number; flickerPhase: number;
+      wobbleSpeed: number; wobblePhase: number;
+      logRot: number;
+    }> = [];
+    // Anillo perimetral
+    for (let i = 0; i < PERIMETRO; i++) {
+      const ang = (i / PERIMETRO) * Math.PI * 2 + (rng() - 0.5) * 0.12;
+      const r = 4.7 + (rng() - 0.5) * 0.6;
+      list.push({
+        x: Math.cos(ang) * r,
+        z: Math.sin(ang) * r,
+        scale: 0.85 + rng() * 0.85,
+        flickerSpeed: 9 + rng() * 8,
+        flickerPhase: rng() * Math.PI * 2,
+        wobbleSpeed: 4 + rng() * 4,
+        wobblePhase: rng() * Math.PI * 2,
+        logRot: rng() * Math.PI * 2
+      });
+    }
+    // Focos dispersos dentro de la parcela (zonas ya prendidas)
+    for (let i = 0; i < INTERNAS; i++) {
+      list.push({
+        x: (rng() - 0.5) * 7.5,
+        z: (rng() - 0.5) * 7.5,
+        scale: 0.55 + rng() * 0.55,
+        flickerSpeed: 10 + rng() * 8,
+        flickerPhase: rng() * Math.PI * 2,
+        wobbleSpeed: 5 + rng() * 4,
+        wobblePhase: rng() * Math.PI * 2,
+        logRot: rng() * Math.PI * 2
+      });
+    }
+    return list;
+  }, []);
+
+  // === 6 luces puntuales: 4 en las esquinas + 2 al centro ===
+  const fireLights = useMemo(() => {
+    const rng = makeRng(55003);
+    const positions: [number, number][] = [
+      [ 4.2,  4.2], [-4.2,  4.2], [ 4.2, -4.2], [-4.2, -4.2], // 4 esquinas
+      [ 1.8,  0.0], [-2.0,  1.4]                              // 2 internas
+    ];
+    return positions.map(([x, z]) => ({
+      x, z,
+      baseInt: 2.0 + rng() * 1.4,
+      flickerSpeed: 11 + rng() * 8,
       phase: rng() * Math.PI * 2
     }));
   }, []);
 
+  // === 80 brasas: distribuidas alrededor de cada llama ===
+  // Cada brasa nace cerca de una llama aleatoria (perimetral o interna) y
+  // sube en bucle con drift. Como las llamas rodean la parcela, las brasas
+  // vuelan por todos lados, no solo desde un lado.
+  const embers = useMemo(() => {
+    const rng = makeRng(55004);
+    return Array.from({ length: 80 }).map(() => {
+      // Mezcla de orígenes: en anillo perimetral o dentro
+      const inRing = rng() < 0.72;
+      let x0: number, z0: number;
+      if (inRing) {
+        const ang = rng() * Math.PI * 2;
+        const r = 4.4 + rng() * 0.7;
+        x0 = Math.cos(ang) * r;
+        z0 = Math.sin(ang) * r;
+      } else {
+        x0 = (rng() - 0.5) * 8;
+        z0 = (rng() - 0.5) * 8;
+      }
+      // El drift radial empuja las brasas hacia fuera/dentro
+      const driftAng = rng() * Math.PI * 2;
+      return {
+        x0, z0,
+        drift: Math.cos(driftAng) * (0.4 + rng() * 1.8),
+        driftZ: Math.sin(driftAng) * (0.4 + rng() * 1.8),
+        rise: 1.4 + rng() * 1.6,
+        maxY: 2.8 + rng() * 2.5,
+        size: 0.035 + rng() * 0.05,
+        cycleDur: 1.8 + rng() * 1.8,
+        delay: rng() * 3.0,
+        hueShift: rng()
+      };
+    });
+  }, []);
+
+  // === 32 puffs de humo distribuidos también en anillo + interior ===
   const smoke = useMemo(() => {
     const rng = makeRng(55002);
-    return Array.from({ length: 18 }).map(() => ({
-      x: (rng() - 0.5) * 8,
-      z: (rng() - 0.5) * 8,
-      delay: rng() * 1,
-      size: 0.2 + rng() * 0.3,
-      maxY: 3 + rng() * 2
-    }));
+    return Array.from({ length: 32 }).map(() => {
+      const inRing = rng() < 0.7;
+      let x: number, z: number;
+      if (inRing) {
+        const ang = rng() * Math.PI * 2;
+        const r = 4.5 + rng() * 0.8;
+        x = Math.cos(ang) * r;
+        z = Math.sin(ang) * r;
+      } else {
+        x = (rng() - 0.5) * 7.5;
+        z = (rng() - 0.5) * 7.5;
+      }
+      const driftAng = rng() * Math.PI * 2;
+      return {
+        x, z,
+        drift: Math.cos(driftAng) * (1.0 + rng() * 2.2),
+        driftZ: Math.sin(driftAng) * (1.0 + rng() * 2.2),
+        delay: rng() * 2.5,
+        size: 0.42 + rng() * 0.7,
+        cycleDur: 4.5 + rng() * 2.5,
+        maxY: 5.5 + rng() * 3,
+        shade: 0.18 + rng() * 0.22
+      };
+    });
   }, []);
+
 
   useFrame((state) => {
     const t = getElapsed(state.clock.elapsedTime);
-    if (!active) return;
-    flameRefs.current.forEach((g, i) => {
-      if (!g) return;
-      const f = flames[i];
-      const wobble = Math.sin(state.clock.elapsedTime * 8 + f.phase) * 0.08;
-      g.scale.y = f.scale * (1 + wobble);
-      g.rotation.z = Math.sin(state.clock.elapsedTime * 5 + f.phase) * 0.1;
+    if (!active) {
+      // Apagar luces para no dejarlas encendidas si el componente se desactiva
+      fireLightRefs.current.forEach(l => { if (l) l.intensity = 0; });
+      return;
+    }
+    const ct = state.clock.elapsedTime;
+
+    // === Llamas: flicker rápido en scale.y, scale.x más sutil ===
+    flames.forEach((f, i) => {
+      const flick = Math.sin(ct * f.flickerSpeed + f.flickerPhase);
+      const flick2 = Math.sin(ct * f.flickerSpeed * 1.7 + f.flickerPhase * 1.3);
+      const sy = 1 + flick * 0.22 + flick2 * 0.08;
+      const sx = 1 + flick2 * 0.10;
+      const wob = Math.sin(ct * f.wobbleSpeed + f.wobblePhase) * 0.08;
+      [flameInnerRefs, flameMidRefs, flameOuterRefs].forEach(group => {
+        const m = group.current[i];
+        if (m) {
+          m.scale.set(sx, sy, sx);
+          m.rotation.z = wob;
+        }
+      });
+      const halo = flameHaloRefs.current[i];
+      if (halo) {
+        halo.scale.set(sx * 1.2, sy * 0.85, sx * 1.2);
+        const mat = halo.material as THREE.MeshStandardMaterial;
+        mat.opacity = 0.42 + Math.sin(ct * f.flickerSpeed * 0.7 + f.flickerPhase) * 0.13;
+      }
+      const ring = glowRingRefs.current[i];
+      if (ring) {
+        const rs = 1 + Math.sin(ct * 4 + f.wobblePhase) * 0.12;
+        ring.scale.set(rs, 1, rs);
+        const mat = ring.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.55 + Math.sin(ct * 6 + f.flickerPhase) * 0.18;
+      }
     });
+
+    // === Luces puntuales con flicker individual ===
+    fireLights.forEach((fl, i) => {
+      const light = fireLightRefs.current[i];
+      if (!light) return;
+      const flick = Math.sin(ct * fl.flickerSpeed + fl.phase);
+      const flick2 = Math.sin(ct * fl.flickerSpeed * 0.6 + fl.phase * 2);
+      light.intensity = fl.baseInt * (1 + flick * 0.35 + flick2 * 0.18);
+    });
+
+    // === Resplandor general del suelo: pulso lento ===
+    if (groundGlowRef.current) {
+      const mat = groundGlowRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.42 + Math.sin(ct * 2.5) * 0.10;
+    }
+
+    // === Brasas: cycle parabolic — sube, va perdiendo opacidad, reset ===
+    if (embersRef.current) {
+      embersRef.current.children.forEach((c, i) => {
+        const e = embers[i]; if (!e) return;
+        const cycleT = ((t + e.delay) % e.cycleDur) / e.cycleDur; // 0..1
+        // Trayectoria: parábola Y, lineal X+Z con drift, con leve wobble
+        const y = cycleT * e.maxY * (1.15 - cycleT * 0.35);
+        const wobX = Math.sin(cycleT * 6 + i) * 0.18;
+        const wobZ = Math.cos(cycleT * 5 + i) * 0.12;
+        c.position.set(
+          e.x0 + e.drift * cycleT + wobX,
+          0.05 + y,
+          e.z0 + e.driftZ * cycleT + wobZ
+        );
+        const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        // Fade in rápido, fade out lento; las brasas se enfrían arriba
+        const fadeIn = Math.min(1, cycleT * 6);
+        const fadeOut = Math.max(0, 1 - cycleT);
+        mat.opacity = fadeIn * fadeOut;
+        // Las brasas viajan de amarillo brillante a rojo oscuro (se enfrían)
+        const coolFactor = cycleT * (0.4 + e.hueShift * 0.4);
+        mat.emissiveIntensity = 2.5 * (1 - cycleT * 0.6);
+        const col = mat.color as THREE.Color;
+        col.setRGB(1, 0.7 - coolFactor * 0.4, 0.2 - coolFactor * 0.18);
+        const emCol = mat.emissive as THREE.Color;
+        emCol.setRGB(1, 0.5 - coolFactor * 0.3, 0.1);
+      });
+    }
+
+    // === Humo: cycle multicapa con curva ascendente y dispersión lateral ===
     if (smokeRef.current) {
       smokeRef.current.children.forEach((c, i) => {
         const s = smoke[i]; if (!s) return;
-        const localT = Math.max(0, t - s.delay);
-        const phase = (localT * 0.35) % 1;
-        c.position.y = phase * s.maxY;
-        c.scale.setScalar(1 + phase * 1.5);
+        const cycleT = ((t + s.delay) % s.cycleDur) / s.cycleDur;
+        const y = cycleT * s.maxY;
+        // Curva: el humo se curva hacia un lado al subir
+        const curveX = Math.sin(cycleT * Math.PI * 0.6) * 0.6 + cycleT * s.drift;
+        const curveZ = Math.cos(cycleT * Math.PI * 0.4) * 0.4 + cycleT * s.driftZ;
+        c.position.set(s.x + curveX, 0.3 + y, s.z + curveZ);
         const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
-        mat.opacity = (1 - phase) * 0.55;
+        const fadeIn = Math.min(1, cycleT * 3);
+        const fadeOut = Math.max(0, 1 - cycleT * 0.95);
+        mat.opacity = fadeIn * fadeOut * 0.65;
+        c.scale.setScalar(s.size * (1 + cycleT * 2.2));
+        // El humo se oscurece al subir (más denso al principio, más gris arriba)
+        const shade = s.shade + cycleT * 0.25;
+        (mat.color as THREE.Color).setRGB(shade, shade * 0.97, shade * 0.94);
       });
     }
   });
@@ -2076,39 +2392,146 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
   if (!active) return null;
   return (
     <>
-      {/* Llamas: cada una son varios conos apilados (rojo→naranja→amarillo) */}
+      {/* === Anillo de resplandor que rodea toda la parcela === */}
+      <mesh ref={groundGlowRef} position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[3.6, 6.2, 48]} />
+        <meshBasicMaterial color="#ff5a18" transparent opacity={0.4} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
+
+      {/* === COLUMNAS DE FUEGO (muro) === */}
       {flames.map((f, i) => (
-        <group key={i} position={[f.x, 0, f.z]} ref={(el) => { if (el) flameRefs.current[i] = el; }} scale={f.scale}>
-          <mesh position={[0, 0.25, 0]} castShadow>
-            <coneGeometry args={[0.3, 0.5, 8]} />
-            <meshStandardMaterial color="#c0260e" emissive="#ff4d1c" emissiveIntensity={0.7} roughness={0.5} />
+        <group key={i} position={[f.x, 0, f.z]} scale={f.scale}>
+          {/* Anillo de resplandor en el suelo bajo la llama */}
+          <mesh
+            ref={(el) => { glowRingRefs.current[i] = el; }}
+            position={[0, 0.02, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <ringGeometry args={[0.18, 0.55, 24]} />
+            <meshBasicMaterial color="#ff8a2a" transparent opacity={0.55} side={THREE.DoubleSide} depthWrite={false} />
           </mesh>
-          <mesh position={[0, 0.55, 0]}>
-            <coneGeometry args={[0.22, 0.5, 8]} />
-            <meshStandardMaterial color="#ff7a1c" emissive="#ff7a1c" emissiveIntensity={0.9} />
+
+          {/* Tronco carbonizado en la base */}
+          <mesh position={[0, 0.06, 0]} rotation={[0, f.logRot, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.07, 0.09, 0.55, 8]} />
+            <meshStandardMaterial color="#1a0805" roughness={0.95} emissive="#ff3a05" emissiveIntensity={0.4} />
           </mesh>
-          <mesh position={[0, 0.85, 0]}>
-            <coneGeometry args={[0.13, 0.4, 8]} />
-            <meshStandardMaterial color="#ffd34d" emissive="#ffea7a" emissiveIntensity={1.1} />
+          {/* Brasas en la base del tronco */}
+          <mesh position={[0, 0.06, 0]}>
+            <sphereGeometry args={[0.22, 10, 8]} />
+            <meshStandardMaterial color="#ff5018" emissive="#ff3000" emissiveIntensity={1.8} transparent opacity={0.9} />
           </mesh>
-          {/* Brasas en la base */}
-          <mesh position={[0, 0.02, 0]}>
-            <sphereGeometry args={[0.18, 8, 6]} />
-            <meshStandardMaterial color="#ff5722" emissive="#ff5722" emissiveIntensity={0.8} />
+
+          {/* Halo (más grande, transparente) — da volumen al fuego */}
+          <mesh
+            ref={(el) => { flameHaloRefs.current[i] = el; }}
+            position={[0, 0.6, 0]}
+          >
+            <sphereGeometry args={[0.5, 12, 10]} />
+            <meshStandardMaterial
+              color="#ff3a05"
+              emissive="#ff3a05"
+              emissiveIntensity={1.5}
+              transparent
+              opacity={0.45}
+              depthWrite={false}
+            />
+          </mesh>
+
+          {/* Capa exterior: roja-anaranjada, alargada */}
+          <mesh
+            ref={(el) => { flameOuterRefs.current[i] = el; }}
+            position={[0, 0.55, 0]}
+            castShadow
+          >
+            <coneGeometry args={[0.32, 1.1, 12]} />
+            <meshStandardMaterial
+              color="#ff4a10"
+              emissive="#ff3a05"
+              emissiveIntensity={1.6}
+              roughness={0.4}
+              transparent
+              opacity={0.92}
+            />
+          </mesh>
+          {/* Capa media: naranja brillante */}
+          <mesh
+            ref={(el) => { flameMidRefs.current[i] = el; }}
+            position={[0, 0.45, 0]}
+          >
+            <coneGeometry args={[0.22, 0.9, 10]} />
+            <meshStandardMaterial
+              color="#ff8a18"
+              emissive="#ff7a05"
+              emissiveIntensity={2.2}
+              transparent
+              opacity={0.94}
+            />
+          </mesh>
+          {/* Núcleo: amarillo casi blanco (la parte más caliente) */}
+          <mesh
+            ref={(el) => { flameInnerRefs.current[i] = el; }}
+            position={[0, 0.35, 0]}
+          >
+            <coneGeometry args={[0.13, 0.65, 8]} />
+            <meshStandardMaterial
+              color="#ffea7a"
+              emissive="#ffd54a"
+              emissiveIntensity={3.0}
+              transparent
+              opacity={0.96}
+            />
           </mesh>
         </group>
       ))}
-      {/* Luz emisiva general */}
-      <pointLight position={[0, 1.5, 0]} intensity={2} color="#ff7a3d" distance={12} decay={2} />
-      {/* Humo */}
-      <group ref={smokeRef}>
-        {smoke.map((s, i) => (
-          <mesh key={i} position={[s.x, 0, s.z]}>
-            <sphereGeometry args={[s.size, 8, 6]} />
-            <meshStandardMaterial color="#3a3a3a" transparent opacity={0} roughness={1} />
+
+      {/* === BRASAS FLOTANTES === */}
+      <group ref={embersRef}>
+        {embers.map((e, i) => (
+          <mesh key={i} position={[e.x0, 0, e.z0]} scale={e.size}>
+            <sphereGeometry args={[1, 6, 4]} />
+            <meshStandardMaterial
+              color="#ffb050"
+              emissive="#ff7020"
+              emissiveIntensity={2.5}
+              transparent
+              opacity={0}
+              depthWrite={false}
+            />
           </mesh>
         ))}
       </group>
+
+      {/* === HUMO MULTICAPA === */}
+      <group ref={smokeRef}>
+        {smoke.map((s, i) => (
+          <mesh key={i} position={[s.x, 0, s.z]}>
+            <sphereGeometry args={[s.size, 10, 8]} />
+            <meshStandardMaterial
+              color="#2a2520"
+              transparent
+              opacity={0}
+              roughness={1}
+              depthWrite={false}
+            />
+          </mesh>
+        ))}
+      </group>
+
+      {/* === LUCES PARPADEANTES === */}
+      {fireLights.map((fl, i) => (
+        <pointLight
+          key={i}
+          ref={(el) => { fireLightRefs.current[i] = el; }}
+          position={[fl.x, 0.8, fl.z]}
+          color="#ff7a3d"
+          intensity={fl.baseInt}
+          distance={11}
+          decay={2}
+        />
+      ))}
+      {/* Luz alta más sutil que tinta toda la escena de color caliente */}
+      <pointLight position={[0, 6, 0]} intensity={0.9} color="#ff5018" distance={22} decay={2} />
     </>
   );
 };
@@ -3111,20 +3534,26 @@ const UFOShootDown: React.FC<{ active: boolean; durationSec?: number }> = ({ act
       const gt = t - T_GROUND;
       const visible = gt >= 0;
       smokeColumnRef.current.visible = visible;
+      // Humo cíclico: cada partícula sube ~3.5 s, se desvanece y reaparece desde
+      // abajo. Cada una tiene su propio desfase (s.delay) para que no se vea un
+      // ritmo uniforme. Así el OVNI estrellado sigue echando humo INDEFINIDAMENTE
+      // mientras el componente esté activo (incluido en aftermath).
+      const cycleDur = 3.5;
       smokeColumnRef.current.children.forEach((c, idx) => {
         const s = smokeColumn[idx]; if (!s) return;
-        const localT = Math.max(0, gt - s.delay);
-        const y = 0.3 + localT * s.rise;
+        const cycleT = ((Math.max(0, gt) + s.delay) % cycleDur);
+        const k = cycleT / cycleDur; // 0..1 en el ciclo
+        const y = 0.3 + cycleT * s.rise;
         c.position.set(
-          s.x + Math.sin(localT * 0.5 + idx) * 0.15,
+          s.x + Math.sin(cycleT * 0.7 + idx) * 0.18,
           y,
-          s.z + Math.cos(localT * 0.4 + idx) * 0.15
+          s.z + Math.cos(cycleT * 0.55 + idx) * 0.18
         );
         const mat = ((c as THREE.Mesh).material) as THREE.MeshStandardMaterial;
-        const fadeIn = Math.min(1, localT * 2);
-        const fadeOut = Math.max(0, 1 - localT / 3.0);
-        mat.opacity = fadeIn * fadeOut * 0.5;
-        c.scale.setScalar(s.size * (1 + localT * 0.4));
+        const fadeIn = Math.min(1, k * 4);   // 0 → 1 en el primer 25% del ciclo
+        const fadeOut = Math.max(0, 1 - k);   // 1 → 0 lineal
+        mat.opacity = fadeIn * fadeOut * 0.55;
+        c.scale.setScalar(s.size * (1 + k * 0.7));
       });
     }
     if (craterRef.current) {
@@ -3140,6 +3569,11 @@ const UFOShootDown: React.FC<{ active: boolean; durationSec?: number }> = ({ act
         fireLightRef.current.position.set(CRASH_X, 0.6, CRASH_Z);
         const fade = Math.max(0, 1 - (t - T_CRASH) / 2.5);
         fireLightRef.current.intensity = (4 + Math.sin(state.clock.elapsedTime * 18) * 1.5) * fade;
+      } else if (t >= T_CRASH + 2.5) {
+        // Brasas — luz tenue parpadeante bajo el OVNI estrellado, INDEFINIDA
+        // (para que durante el aftermath siga viéndose el resplandor del fuego)
+        fireLightRef.current.position.set(CRASH_X, 0.4, CRASH_Z);
+        fireLightRef.current.intensity = 0.9 + Math.sin(state.clock.elapsedTime * 8) * 0.4;
       } else {
         fireLightRef.current.intensity = 0;
       }
@@ -5492,9 +5926,10 @@ export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, clim
         <hemisphereLight args={['#fafaf5', '#c4cdc0', 0.35]} />
 
         {/* Cubo de papel que envuelve toda la escena (suelo + paredes + techo).
-            Tamaño elegido para dejar margen alrededor de la parcela (10×10) sin
-            que la cámara orbital (maxDistance=18) atraviese las paredes. */}
-        <PaperRoom size={40} height={26} clima={clima} />
+            Tamaño generoso (60) y alto (36) para dejar margen amplio alrededor
+            de la parcela (10×10) y que la cámara pueda alejarse hasta
+            maxDistance=30 sin tocar las paredes. */}
+        <PaperRoom size={60} height={36} clima={clima} />
 
         <Terrain humedad={simulacion.humedadSueloActual} tipoSuelo={simulacion.tipoSuelo} size={10} />
         <CropField simulacion={simulacion} vfxEvent={vfxEvent} />
@@ -5553,10 +5988,11 @@ export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, clim
         <OrbitControls
           enablePan={false}
           enableZoom={true}
-          minDistance={6}
-          // Limitamos maxDistance a 18 para que la cámara orbital nunca atraviese
-          // las paredes del PaperRoom (size=40 → muros a ±20 del centro).
-          maxDistance={18}
+          // minDistance bajo → permite acercarse mucho a una planta concreta.
+          minDistance={2.5}
+          // maxDistance generoso para vista panorámica. Mantenemos un colchón
+          // respecto a las paredes del PaperRoom (size=60 → muros a ±30).
+          maxDistance={30}
           minPolarAngle={Math.PI / 6}
           maxPolarAngle={Math.PI / 2.1}
           autoRotate={false}
