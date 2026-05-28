@@ -752,6 +752,31 @@ const SimulationView: React.FC = () => {
     if (derribandoOvni) return;
     setDerribandoOvni(true);
     triggerFlash('derribar_ovni' as VFXEffect);
+    // Mata cualquier rastro del UFORadiation antes de mostrar el derribo:
+    // si el OVNI vino con un flash de 'ola_radiacion_uv' (p.ej. el jugador lo
+    // acaba de invocar del panel), ese flash seguiría vivo durante 7 s y el
+    // modelo 3D del OVNI se vería volando a la vez que cae el otro (duplicado).
+    // Limpiando también su aftermath por seguridad.
+    setFlashes(prev => {
+      let changed = false;
+      const next = prev.filter(f => {
+        if (f.effect !== 'ola_radiacion_uv') return true;
+        const handle = flashTimeoutsRef.current.get(f.id);
+        if (handle != null) {
+          window.clearTimeout(handle);
+          flashTimeoutsRef.current.delete(f.id);
+        }
+        changed = true;
+        return false;
+      });
+      return changed ? next : prev;
+    });
+    setAftermathSet(prev => {
+      if (!prev.has('ola_radiacion_uv' as VFXEffect)) return prev;
+      const next = new Set(prev);
+      next.delete('ola_radiacion_uv' as VFXEffect);
+      return next;
+    });
     // Marca todos los OVNIs activos ahora mismo como derribados (lo normal es
     // que haya uno solo; si por algún motivo hubiera varios, caen todos a la vez).
     const ovnisActivos = eventosActivosMemo
