@@ -60,6 +60,11 @@ interface EventoActivoInfo {
    *  la acción correctora. Los problemas fitosanitarios y bióticos NUNCA caducan
    *  solos: si tienes pulgones, los seguirás teniendo hasta tratar. */
   permanente?: boolean;
+  /** Si true, la animación 3D de este evento solo se dispara UNA VEZ (el día
+   *  que aparece) y no se re-renderiza continuamente desde baseVFX. El evento
+   *  sigue apareciendo en el panel de "eventos activos" durante la ventana,
+   *  pero el tornado/tsunami/granizo… no debe repetir su animación cada día. */
+  oneShot?: boolean;
 }
 
 const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
@@ -99,18 +104,22 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego'], accionTexto: 'Riega abundantemente' },
   ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching'], accionTexto: 'Riega y considera mulching para retener humedad' },
 
-  // Climáticos transitorios — pasan en pocos días pero conviene mostrarlos
-  // mientras la ventana activa los considere recientes.
-  lluvia_torrencial: { emoji: '🌧️', nombre: 'Lluvia torrencial', acciones: [], accionTexto: 'El suelo queda saturado al 100%; se irá secando solo' },
-  granizo: { emoji: '🧊', nombre: 'Granizo', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase' },
-  viento_fuerte: { emoji: '💨', nombre: 'Viento fuerte', acciones: [], accionTexto: 'Espera a que amaine' },
-  helada: { emoji: '❄️', nombre: 'Helada', acciones: [], accionTexto: 'Espera a que el frío remita' },
-  nevada: { emoji: '🌨️', nombre: 'Nevada', acciones: [], accionTexto: 'Espera al deshielo' },
-  rayo_caido: { emoji: '⚡', nombre: 'Rayo caído', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento para mitigar el estrés' },
+  // Climáticos transitorios — la animación 3D se dispara UNA SOLA VEZ el día
+  // que ocurren (vía flash puntual). Aparecen en el panel de eventos activos
+  // durante la ventana de días, pero no relanzan la animación cada día.
+  // El incendio se queda como continuo (el fuego sigue ardiendo) porque su
+  // resolución necesita riego — el resto son fenómenos meteorológicos de
+  // duración corta cuyo daño ya está hecho cuando pasan.
+  lluvia_torrencial: { emoji: '🌧️', nombre: 'Lluvia torrencial', acciones: [], accionTexto: 'El suelo queda saturado al 100%; se irá secando solo', oneShot: true },
+  granizo: { emoji: '🧊', nombre: 'Granizo', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase', oneShot: true },
+  viento_fuerte: { emoji: '💨', nombre: 'Viento fuerte', acciones: [], accionTexto: 'Espera a que amaine', oneShot: true },
+  helada: { emoji: '❄️', nombre: 'Helada', acciones: [], accionTexto: 'Espera a que el frío remita', oneShot: true },
+  nevada: { emoji: '🌨️', nombre: 'Nevada', acciones: [], accionTexto: 'Espera al deshielo', oneShot: true },
+  rayo_caido: { emoji: '⚡', nombre: 'Rayo caído', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento para mitigar el estrés', oneShot: true },
   incendio_proximo: { emoji: '🔥', nombre: 'Incendio próximo', acciones: ['riego'], accionTexto: 'Riega para limpiar cenizas y refrescar' },
-  inundacion: { emoji: '🌊', nombre: 'Tsunami / inundación', acciones: ['aireacion_suelo'], accionTexto: 'Airea el suelo cuando baje el agua' },
-  tornado: { emoji: '🌀', nombre: 'Tornado', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase' },
-  terremoto: { emoji: '🌍', nombre: 'Terremoto', acciones: ['aireacion_suelo'], accionTexto: 'Airea las raíces dañadas por la sacudida' },
+  inundacion: { emoji: '🌊', nombre: 'Tsunami / inundación', acciones: ['aireacion_suelo'], accionTexto: 'Airea el suelo cuando baje el agua', oneShot: true },
+  tornado: { emoji: '🌀', nombre: 'Tornado', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase', oneShot: true },
+  terremoto: { emoji: '🌍', nombre: 'Terremoto', acciones: ['aireacion_suelo'], accionTexto: 'Airea las raíces dañadas por la sacudida', oneShot: true },
   // El OVNI sólo se va con el cañón anti-OVNI. acciones=[] para que ningún
   // riego ni malla lo resuelva por el flujo normal; la "resolución" se hace
   // localmente añadiendo el idEvento al set ovnisDerribadosIds (persistido en
@@ -391,6 +400,11 @@ const SimulationView: React.FC = () => {
   type FlashEntry = { id: number; effect: VFXEffect; expiresAt: number };
   const [flashes, setFlashes] = useState<FlashEntry[]>([]);
   const [aftermathSet, setAftermathSet] = useState<Set<VFXEffect>>(new Set());
+  // Eventos cuyo VFX está en "fade-out" porque el jugador acaba de aplicar la
+  // acción correctora. El componente del evento (p.ej. Fire) recibe un flag
+  // para que las llamas se reduzcan progresivamente durante la animación de la
+  // acción, en lugar de desaparecer de golpe.
+  const [extinguishingSet, setExtinguishingSet] = useState<Set<VFXEffect>>(new Set());
   const flashIdCounter = useRef(0);
   const flashTimeoutsRef = useRef<Map<number, number>>(new Map());
   const knownEventoIdsRef = useRef<Set<number>>(new Set());
@@ -413,8 +427,13 @@ const SimulationView: React.FC = () => {
     [eventos, simulacion?.diaActual, eventosIgnoradosIds]
   );
   const baseVFXMemo: VFXEffect | null = React.useMemo(() => {
-    if (eventosActivosMemo.length === 0) return null;
-    return eventosActivosMemo.reduce(
+    // Los eventos `oneShot` (tornado, tsunami, granizo…) NO contribuyen al
+    // baseVFX porque su animación ya se disparó vía flash el día que ocurrió.
+    // Si los incluyéramos, la animación se relanzaría cada render mientras el
+    // evento siga apareciendo en el panel de activos.
+    const candidatos = eventosActivosMemo.filter(({ info }) => !info.oneShot);
+    if (candidatos.length === 0) return null;
+    return candidatos.reduce(
       (m, e) => e.evento.diaEvento > m.evento.diaEvento ? e : m
     ).evento.tipoEvento as VFXEffect;
   }, [eventosActivosMemo]);
@@ -565,8 +584,12 @@ const SimulationView: React.FC = () => {
       if (knownEventoIdsRef.current.has(ev.idEvento)) return;
       knownEventoIdsRef.current.add(ev.idEvento);
       if (ev.origen !== 'sistema') return;
-      // Solo flash si NO es persistente (los persistentes salen vía baseVFX continuo)
-      if (EVENTOS_PERSISTENTES[ev.tipoEvento]) return;
+      // Solo flash si:
+      //  - NO es persistente (plagas, sequías…) — esos salen vía baseVFX continuo, O
+      //  - es `oneShot` (tornado, tsunami…) — su animación es un evento de un
+      //    solo día y solo debe dispararse en su aparición, no en cada render.
+      const info = EVENTOS_PERSISTENTES[ev.tipoEvento];
+      if (info && !info.oneShot) return;
       if (!puntualMasReciente || ev.diaEvento > puntualMasReciente.diaEvento) puntualMasReciente = ev;
     });
     if (puntualMasReciente) {
@@ -614,8 +637,9 @@ const SimulationView: React.FC = () => {
     // Cancelar inmediatamente cualquier flash del día anterior — si no, sus
     // timers internos siguen corriendo y se ven en el día nuevo.
     clearAllFlashes();
-    // Avanzar día también limpia el aftermath: amanece "página en blanco".
+    // Avanzar día también limpia el aftermath y los fade-outs en curso.
     setAftermathSet(new Set());
+    setExtinguishingSet(new Set());
     try {
       const nuevoEstado = await simulacionService.avanzarDia(parseInt(id));
       await loadSimulationData();
@@ -632,6 +656,7 @@ const SimulationView: React.FC = () => {
     setIsAdvancing(true);
     clearAllFlashes();
     setAftermathSet(new Set());
+    setExtinguishingSet(new Set());
     try {
       // Una sola petición HTTP en lugar de N (evita el cold start + latencia × N)
       await simulacionService.avanzarVariosDias(parseInt(id), dias);
@@ -707,6 +732,7 @@ const SimulationView: React.FC = () => {
   const limpiarTodasAfecciones = () => {
     clearAllFlashes();
     setAftermathSet(new Set());
+    setExtinguishingSet(new Set());
     const idsActivos = eventosActivosMemo
       .map(({ evento }) => evento.idEvento)
       .filter((id): id is number => id != null);
@@ -738,9 +764,16 @@ const SimulationView: React.FC = () => {
       // Si es así, no disparamos el flash de la acción: el baseVFX del evento
       // resuelto cae a null al instante (loadSimulationData lo recalcula) y
       // las partículas desaparecen sin que el flash de 4 s las suplante.
-      const resuelveActivoActual = eventosActivosMemo.some(({ info }) =>
-        info.acciones.includes(tipoAplicado as TipoEvento)
+      // Además, recogemos los TIPOS concretos resueltos para poder retirarlos
+      // a la vez del aftermathSet y de la cola de flashes — si no, el modelo
+      // 3D (llamas del incendio, agua del tsunami...) seguiría en pantalla
+      // hasta avanzar día aunque la acción correctora ya se haya aplicado.
+      const tiposResueltos = new Set<string>(
+        eventosActivosMemo
+          .filter(({ info }) => info.acciones.includes(tipoAplicado as TipoEvento))
+          .map(({ evento }) => evento.tipoEvento)
       );
+      const resuelveActivoActual = tiposResueltos.size > 0;
 
       await simulacionService.aplicarEvento(parseInt(id), eventoData);
       await loadSimulationData();
@@ -752,13 +785,63 @@ const SimulationView: React.FC = () => {
       });
 
       if (tipoAplicado) {
-        if (!resuelveActivoActual) {
-          // Acción manual sin resolver nada: mostrar flash temporal de feedback.
-          triggerFlash(tipoAplicado as VFXEffect);
-        } else {
-          // La acción resolvió un evento → limpiamos cualquier flash en curso
-          // para que la transición sea limpia.
-          clearAllFlashes();
+        // SIEMPRE mostramos la animación de la acción aplicada (riego =
+        // aspersor + goteo, poda = tractor, tratamiento = pulverizador...).
+        // Antes la suprimíamos cuando resolvía un evento, pero el jugador no
+        // veía feedback de su acción.
+        triggerFlash(tipoAplicado as VFXEffect);
+
+        if (resuelveActivoActual) {
+          // Los eventos resueltos se mantienen visibles durante la duración
+          // del flash de la acción para que se vea la transición, y luego se
+          // eliminan. Mientras dura esa ventana, los marcamos en
+          // `extinguishingSet` para que el componente del evento (Fire) sepa
+          // que tiene que apagarse progresivamente en lugar de quedarse a
+          // tope hasta el último frame.
+          setExtinguishingSet(prev => {
+            let changed = false;
+            const next = new Set(prev);
+            tiposResueltos.forEach(t => {
+              if (!next.has(t as VFXEffect)) {
+                next.add(t as VFXEffect);
+                changed = true;
+              }
+            });
+            return changed ? next : prev;
+          });
+          const actionMs = FLASH_DURATIONS_MS_MAP[tipoAplicado] ?? DEFAULT_FLASH_MS;
+          window.setTimeout(() => {
+            setExtinguishingSet(prev => {
+              let changed = false;
+              const next = new Set(prev);
+              tiposResueltos.forEach(t => {
+                if (next.delete(t as VFXEffect)) changed = true;
+              });
+              return changed ? next : prev;
+            });
+            setAftermathSet(prev => {
+              let changed = false;
+              const next = new Set(prev);
+              tiposResueltos.forEach(t => {
+                if (next.delete(t as VFXEffect)) changed = true;
+              });
+              return changed ? next : prev;
+            });
+            setFlashes(prev => {
+              let changed = false;
+              const next = prev.filter(f => {
+                if (!tiposResueltos.has(f.effect)) return true;
+                const handle = flashTimeoutsRef.current.get(f.id);
+                if (handle != null) {
+                  window.clearTimeout(handle);
+                  flashTimeoutsRef.current.delete(f.id);
+                }
+                changed = true;
+                return false;
+              });
+              return changed ? next : prev;
+            });
+          }, actionMs);
         }
         // Si el evento aplicado es persistente (plaga, sequía, enfermedad...), abrir el
         // panel de alertas en la pestaña "Alertas" para que el usuario lo vea de inmediato.
@@ -933,6 +1016,7 @@ const SimulationView: React.FC = () => {
             simulacion={simulacion}
             vfxEvent={primaryFlashVFX ?? baseVFX}
             vfxEvents={sceneVFXSet}
+            extinguishingEvents={extinguishingSet}
             clima={climaEscena}
             eventosActivos={eventosBanderitas}
             hasMallas={tieneMallas}

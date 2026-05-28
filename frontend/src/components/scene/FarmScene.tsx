@@ -37,6 +37,10 @@ interface FarmSceneProps {
   /** Conjunto de TODOS los efectos activos: flashes en curso + evento
       persistente (UV) + aftermaths. La escena 3D los muestra en paralelo. */
   vfxEvents?: Set<string>;
+  /** Eventos cuyo VFX está en "fade-out" porque el jugador acaba de aplicar
+      la acción correctora. Los componentes correspondientes (Fire, etc.) lo
+      usan para reducir progresivamente su intensidad en vez de cortar de golpe. */
+  extinguishingEvents?: Set<string>;
   /** Clima ambiental — cambia los doodles dibujados en las paredes del cubo de papel. */
   clima?: 'normal' | 'caluroso' | 'lluvioso' | 'frio';
   /** Eventos activos sin resolver — se materializan como banderitas clavadas en el suelo. */
@@ -2171,7 +2175,7 @@ const Tornado: React.FC<{ active: boolean; durationSec?: number }> = ({ active, 
 //   las brasas y el humo son cíclicos, las llamas usan senos infinitos.
 // ============================================================
 
-const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, durationSec = 4 }) => {
+const Fire: React.FC<{ active: boolean; durationSec?: number; extinguishing?: boolean }> = ({ active, durationSec = 4, extinguishing = false }) => {
   const flameInnerRefs = useRef<(THREE.Mesh | null)[]>([]);
   const flameMidRefs = useRef<(THREE.Mesh | null)[]>([]);
   const flameOuterRefs = useRef<(THREE.Mesh | null)[]>([]);
@@ -2182,6 +2186,12 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
   const groundGlowRef = useRef<THREE.Mesh>(null);
   const fireLightRefs = useRef<(THREE.PointLight | null)[]>([]);
   const getElapsed = useEffectClock(active);
+  // Cuando el jugador aplica riego sobre el incendio, Fire entra en modo
+  // "extinguishing": las llamas, brasas y luces se reducen progresivamente
+  // (en ~3.5 s) en lugar de cortarse de golpe. Se guarda el clock-time del
+  // momento exacto en que empezó la extinción para calcular el avance.
+  const extinguishStartRef = useRef<number | null>(null);
+  const FADE_DURATION = 3.5;
 
   // === ~20 columnas de fuego: 16 en anillo perimetral + 4-5 dentro ===
   // El anillo rodea la parcela (radio ~4.8) con leve jitter; las internas
@@ -2312,36 +2322,54 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
     if (!active) {
       // Apagar luces para no dejarlas encendidas si el componente se desactiva
       fireLightRefs.current.forEach(l => { if (l) l.intensity = 0; });
+      extinguishStartRef.current = null;
       return;
     }
     const ct = state.clock.elapsedTime;
+
+    // === Factor de extinción (riego apagando el fuego) ===
+    // dim = 1 con fuego a tope, baja a 0 al final de la extinción.
+    // steamBoost crece simétricamente para añadir más "vapor" al humo.
+    if (extinguishing) {
+      if (extinguishStartRef.current == null) extinguishStartRef.current = ct;
+    } else {
+      extinguishStartRef.current = null;
+    }
+    const fadeT = extinguishStartRef.current != null
+      ? Math.min(1, (ct - extinguishStartRef.current) / FADE_DURATION)
+      : 0;
+    const dim = 1 - fadeT;          // 1 → 0
+    const steamBoost = fadeT;        // 0 → 1 (humo se intensifica)
 
     // === Llamas: flicker rápido en scale.y, scale.x más sutil ===
     flames.forEach((f, i) => {
       const flick = Math.sin(ct * f.flickerSpeed + f.flickerPhase);
       const flick2 = Math.sin(ct * f.flickerSpeed * 1.7 + f.flickerPhase * 1.3);
-      const sy = 1 + flick * 0.22 + flick2 * 0.08;
-      const sx = 1 + flick2 * 0.10;
+      const sy = (1 + flick * 0.22 + flick2 * 0.08) * dim;
+      const sx = (1 + flick2 * 0.10) * dim;
       const wob = Math.sin(ct * f.wobbleSpeed + f.wobblePhase) * 0.08;
       [flameInnerRefs, flameMidRefs, flameOuterRefs].forEach(group => {
         const m = group.current[i];
         if (m) {
           m.scale.set(sx, sy, sx);
           m.rotation.z = wob;
+          m.visible = dim > 0.02;
         }
       });
       const halo = flameHaloRefs.current[i];
       if (halo) {
         halo.scale.set(sx * 1.2, sy * 0.85, sx * 1.2);
         const mat = halo.material as THREE.MeshStandardMaterial;
-        mat.opacity = 0.42 + Math.sin(ct * f.flickerSpeed * 0.7 + f.flickerPhase) * 0.13;
+        mat.opacity = (0.42 + Math.sin(ct * f.flickerSpeed * 0.7 + f.flickerPhase) * 0.13) * dim;
+        halo.visible = dim > 0.02;
       }
       const ring = glowRingRefs.current[i];
       if (ring) {
         const rs = 1 + Math.sin(ct * 4 + f.wobblePhase) * 0.12;
         ring.scale.set(rs, 1, rs);
         const mat = ring.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.55 + Math.sin(ct * 6 + f.flickerPhase) * 0.18;
+        mat.opacity = (0.55 + Math.sin(ct * 6 + f.flickerPhase) * 0.18) * dim;
+        ring.visible = dim > 0.02;
       }
     });
 
@@ -2351,13 +2379,13 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
       if (!light) return;
       const flick = Math.sin(ct * fl.flickerSpeed + fl.phase);
       const flick2 = Math.sin(ct * fl.flickerSpeed * 0.6 + fl.phase * 2);
-      light.intensity = fl.baseInt * (1 + flick * 0.35 + flick2 * 0.18);
+      light.intensity = fl.baseInt * (1 + flick * 0.35 + flick2 * 0.18) * dim;
     });
 
     // === Resplandor general del suelo: pulso lento ===
     if (groundGlowRef.current) {
       const mat = groundGlowRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.42 + Math.sin(ct * 2.5) * 0.10;
+      mat.opacity = (0.42 + Math.sin(ct * 2.5) * 0.10) * dim;
     }
 
     // === Brasas: cycle parabolic — sube, va perdiendo opacidad, reset ===
@@ -2378,10 +2406,10 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
         // Fade in rápido, fade out lento; las brasas se enfrían arriba
         const fadeIn = Math.min(1, cycleT * 6);
         const fadeOut = Math.max(0, 1 - cycleT);
-        mat.opacity = fadeIn * fadeOut;
+        mat.opacity = fadeIn * fadeOut * dim;
         // Las brasas viajan de amarillo brillante a rojo oscuro (se enfrían)
         const coolFactor = cycleT * (0.4 + e.hueShift * 0.4);
-        mat.emissiveIntensity = 2.5 * (1 - cycleT * 0.6);
+        mat.emissiveIntensity = 2.5 * (1 - cycleT * 0.6) * dim;
         const col = mat.color as THREE.Color;
         col.setRGB(1, 0.7 - coolFactor * 0.4, 0.2 - coolFactor * 0.18);
         const emCol = mat.emissive as THREE.Color;
@@ -2402,10 +2430,12 @@ const Fire: React.FC<{ active: boolean; durationSec?: number }> = ({ active, dur
         const mat = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
         const fadeIn = Math.min(1, cycleT * 3);
         const fadeOut = Math.max(0, 1 - cycleT * 0.95);
-        mat.opacity = fadeIn * fadeOut * 0.65;
-        c.scale.setScalar(s.size * (1 + cycleT * 2.2));
-        // El humo se oscurece al subir (más denso al principio, más gris arriba)
-        const shade = s.shade + cycleT * 0.25;
+        // Al extinguirse, el humo se hace más denso (vapor blanco al apagarse).
+        mat.opacity = fadeIn * fadeOut * 0.65 * (1 + steamBoost * 0.7);
+        c.scale.setScalar(s.size * (1 + cycleT * 2.2) * (1 + steamBoost * 0.4));
+        // El humo se oscurece al subir; en extinción tira a blanco-grisáceo (vapor).
+        const baseShade = s.shade + cycleT * 0.25;
+        const shade = baseShade * (1 - steamBoost) + (0.85 - cycleT * 0.15) * steamBoost;
         (mat.color as THREE.Color).setRGB(shade, shade * 0.97, shade * 0.94);
       });
     }
@@ -6235,11 +6265,13 @@ const CoffeeStain: React.FC = () => {
   );
 };
 
-export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, vfxEvents, clima = 'normal', eventosActivos = [], hasMallas = false }) => {
+export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, vfxEvents, extinguishingEvents, clima = 'normal', eventosActivos = [], hasMallas = false }) => {
   // vfxEvents nunca debería ser undefined desde SimulationView, pero por
   // robustez (test, storybooks...) usamos un set vacío como fallback.
   const vfxSet = vfxEvents ?? new Set<string>();
+  const extSet = extinguishingEvents ?? EMPTY_VFX_SET;
   const has = (e: string) => vfxSet.has(e);
+  const isExtinguishing = (e: string) => extSet.has(e);
   // Antes el cielo y el pasto se oscurecían cuando la salud bajaba (efecto "nublado").
   // Con el look "papel cuadriculado" no hay cielo — mantenemos un mínimo de iluminación
   // dramática reduciendo solo la intensidad cuando la salud está muy mal.
@@ -6306,7 +6338,7 @@ export const FarmScene: React.FC<FarmSceneProps> = ({ simulacion, vfxEvent, vfxE
         <TsunamiWave active={has('inundacion')} durationSec={5} />
         <Earthquake active={has('terremoto')} durationSec={5} />
         <Tornado active={has('tornado')} durationSec={4} />
-        <Fire active={has('incendio_proximo')} durationSec={4} />
+        <Fire active={has('incendio_proximo')} durationSec={4} extinguishing={isExtinguishing('incendio_proximo')} />
         <Lightning active={has('rayo_caido')} durationSec={6} />
         <AcidRain active={has('lluvia_acida')} />
         <Snowfall active={has('nevada')} durationSec={4} />
@@ -6376,6 +6408,7 @@ const MemoFarmScene = React.memo(FarmScene, (prev, next) => {
   return (
     prev.vfxEvent === next.vfxEvent &&
     sameVfxSet(prev.vfxEvents, next.vfxEvents) &&
+    sameVfxSet(prev.extinguishingEvents, next.extinguishingEvents) &&
     prev.clima === next.clima &&
     prev.hasMallas === next.hasMallas &&
     sameBanderitas(prev.eventosActivos, next.eventosActivos) &&
