@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { Simulacion, EstadoDiario, Evento, Resultado, Economia, Notificacion } from '../types';
 import { simulacionService } from '../services/simulacionService';
+import { getEventName } from '../components/EventEffects';
 
 // ============================================================================
 // CONTEXT DE SIMULACIÓN
@@ -119,7 +120,7 @@ export const SimulacionProvider: React.FC<SimulacionProviderProps> = ({ children
       agregarNotificacion({
         tipo: 'info',
         titulo: 'Evento aplicado',
-        mensaje: `Se ha aplicado el evento: ${evento.tipoEvento}`
+        mensaje: `Se ha aplicado el evento: ${getEventName(evento.tipoEvento || '')}`
       });
 
       // Recargar simulación para obtener efectos

@@ -68,26 +68,35 @@ interface EventoActivoInfo {
 }
 
 const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
-  // Plagas y enfermedades — persisten hasta que se traten
-  plaga: { emoji: '🐛', nombre: 'Plaga', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario o control biológico', permanente: true },
-  enfermedad: { emoji: '🦠', nombre: 'Enfermedad', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
-  roya: { emoji: '🍂', nombre: 'Roya (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
-  mildiu: { emoji: '🍄', nombre: 'Mildiu (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
-  oidio: { emoji: '⚪', nombre: 'Oídio (hongo)', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
-  virus_mosaico: { emoji: '🧬', nombre: 'Virus del mosaico', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Mitígalo con tratamiento + control biológico', permanente: true },
-  pulgones: { emoji: '🐜', nombre: 'Pulgones', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Usa control biológico (mariquitas) o tratamiento', permanente: true },
-  arana_roja: { emoji: '🕷️', nombre: 'Araña roja', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento + aumenta la humedad', permanente: true },
-  caracoles: { emoji: '🐌', nombre: 'Caracoles', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico', permanente: true },
-  nematodos: { emoji: '🪱', nombre: 'Nematodos', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento fitosanitario', permanente: true },
-  langostas: { emoji: '🦗', nombre: 'Langostas', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento urgente', permanente: true },
-  marabunta_hormigas: { emoji: '🐜', nombre: 'Marabunta de hormigas', acciones: ['tratamiento_fitosanitario', 'control_biologico'], accionTexto: 'Aplica tratamiento o control biológico', permanente: true },
+  // Plagas, enfermedades, malas hierbas y animales — persisten hasta tratar
+  // o hasta que un cataclismo los borre del mapa. Las catástrofes naturales
+  // — tsunami, incendio, helada — arrastran/queman/congelan a cualquier ser
+  // vivo presente en la parcela, así que cualquier insecto, hongo, virus,
+  // mala hierba o animal se considera resuelto si se desata alguno de los 3.
+  // Los marcamos en todas las `acciones` para que aparezcan como "remedios"
+  // en el panel y el cálculo de eventos activos los limpie a la vez.
+  plaga: { emoji: '🐛', nombre: 'Plaga', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, control biológico o una catástrofe (helada, tsunami, incendio)', permanente: true },
+  enfermedad: { emoji: '🦠', nombre: 'Enfermedad', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, control biológico o una catástrofe que la borre', permanente: true },
+  roya: { emoji: '🍂', nombre: 'Roya (hongo)', acciones: ['tratamiento_fitosanitario', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, helada, tsunami o incendio', permanente: true },
+  mildiu: { emoji: '🍄', nombre: 'Mildiu (hongo)', acciones: ['tratamiento_fitosanitario', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, helada, tsunami o incendio', permanente: true },
+  oidio: { emoji: '⚪', nombre: 'Oídio (hongo)', acciones: ['tratamiento_fitosanitario', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, helada, tsunami o incendio', permanente: true },
+  virus_mosaico: { emoji: '🧬', nombre: 'Virus del mosaico', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento + control biológico, o una catástrofe', permanente: true },
+  pulgones: { emoji: '🐜', nombre: 'Pulgones', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Control biológico, tratamiento o catástrofe (frío/agua/fuego)', permanente: true },
+  arana_roja: { emoji: '🕷️', nombre: 'Araña roja', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, control biológico o catástrofe', permanente: true },
+  caracoles: { emoji: '🐌', nombre: 'Caracoles', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, control biológico o catástrofe', permanente: true },
+  nematodos: { emoji: '🪱', nombre: 'Nematodos', acciones: ['tratamiento_fitosanitario', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento o catástrofe (helada / tsunami / incendio)', permanente: true },
+  // Las langostas también pueden ser arrastradas por un tornado.
+  langostas: { emoji: '🦗', nombre: 'Langostas', acciones: ['tratamiento_fitosanitario', 'tornado', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento urgente, tornado o cualquier catástrofe que las elimine', permanente: true },
+  marabunta_hormigas: { emoji: '🐜', nombre: 'Marabunta de hormigas', acciones: ['tratamiento_fitosanitario', 'control_biologico', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Tratamiento, control biológico o catástrofe', permanente: true },
 
-  // Fauna grande — persiste hasta instalar barrera
-  aves_plaga: { emoji: '🐦', nombre: 'Bandadas de aves', acciones: ['instalacion_malla'], accionTexto: 'Instala mallas antipájaros', permanente: true },
-  jabalies: { emoji: '🐗', nombre: 'Jabalíes', acciones: ['instalacion_malla'], accionTexto: 'Instala vallado/mallas', permanente: true },
+  // Fauna grande — persiste hasta instalar barrera; también se dispersa o
+  // muere ante un tornado, tsunami, incendio o una helada brutal.
+  aves_plaga: { emoji: '🐦', nombre: 'Bandadas de aves', acciones: ['instalacion_malla', 'tornado', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Mallas, tornado o una catástrofe que las disperse', permanente: true },
+  jabalies: { emoji: '🐗', nombre: 'Jabalíes', acciones: ['instalacion_malla', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Vallado, helada, tsunami o incendio los echa de la parcela', permanente: true },
 
-  // Malas hierbas — persisten hasta limpiar
-  malas_hierbas: { emoji: '🌾', nombre: 'Malas hierbas', acciones: ['poda', 'mulching'], accionTexto: 'Pasa la azada (poda) o aplica mulching', permanente: true },
+  // Malas hierbas — persisten hasta limpiar; también las arrastra el agua,
+  // las quema un incendio o las mata una helada.
+  malas_hierbas: { emoji: '🌾', nombre: 'Malas hierbas', acciones: ['poda', 'mulching', 'helada', 'inundacion', 'incendio_proximo'], accionTexto: 'Azada, mulching o una catástrofe que las arrase', permanente: true },
 
   // Problemas de suelo persistentes
   salinizacion: { emoji: '🧂', nombre: 'Salinización del suelo', acciones: ['riego', 'enmienda_calcica'], accionTexto: 'Riegos abundantes de lavado + enmienda cálcica' },
@@ -97,12 +106,14 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   // Otros
   contaminacion_quimica: { emoji: '☣️', nombre: 'Contaminación química', acciones: ['compostaje', 'fertilizacion'], accionTexto: 'Aplica compostaje y refuerza con fertilización' },
 
-  // Climáticos persistentes
-  polvo_sahariano: { emoji: '🏜️', nombre: 'Calima sahariana', acciones: ['riego'], accionTexto: 'Riega por aspersión para limpiar las hojas' },
-  niebla_persistente: { emoji: '🌫️', nombre: 'Niebla densa persistente', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento preventivo de hongos' },
+  // Climáticos persistentes. Una lluvia intensa o un tsunami arrastran la
+  // calima; un buen aguacero también acaba con la sequía y la ola de calor;
+  // un viento fuerte dispersa la niebla.
+  polvo_sahariano: { emoji: '🏜️', nombre: 'Calima sahariana', acciones: ['riego', 'lluvia_torrencial', 'inundacion'], accionTexto: 'Riega o deja que la lluvia / un tsunami limpie la calima' },
+  niebla_persistente: { emoji: '🌫️', nombre: 'Niebla densa persistente', acciones: ['tratamiento_fitosanitario', 'viento_fuerte'], accionTexto: 'Aplica tratamiento o suelta un viento fuerte que la disperse' },
   lluvia_acida: { emoji: '☢️', nombre: 'Lluvia ácida', acciones: ['enmienda_calcica', 'riego'], accionTexto: 'Aplica enmienda cálcica y riega para lavar las hojas' },
-  sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego'], accionTexto: 'Riega abundantemente' },
-  ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching'], accionTexto: 'Riega y considera mulching para retener humedad' },
+  sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego', 'lluvia_torrencial', 'inundacion', 'nevada'], accionTexto: 'Riega o desata lluvia, tsunami o nevada para romper la sequía' },
+  ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching', 'lluvia_torrencial'], accionTexto: 'Riega, aplica mulching o deja que una lluvia torrencial enfríe el cultivo' },
 
   // Climáticos transitorios — la animación 3D se dispara UNA SOLA VEZ el día
   // que ocurren (vía flash puntual). Aparecen en el panel de eventos activos
@@ -116,8 +127,8 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   helada: { emoji: '❄️', nombre: 'Helada', acciones: [], accionTexto: 'Espera a que el frío remita', oneShot: true },
   nevada: { emoji: '🌨️', nombre: 'Nevada', acciones: [], accionTexto: 'Espera al deshielo', oneShot: true },
   rayo_caido: { emoji: '⚡', nombre: 'Rayo caído', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento para mitigar el estrés', oneShot: true },
-  incendio_proximo: { emoji: '🔥', nombre: 'Incendio próximo', acciones: ['riego'], accionTexto: 'Riega para limpiar cenizas y refrescar' },
-  inundacion: { emoji: '🌊', nombre: 'Tsunami / inundación', acciones: ['aireacion_suelo'], accionTexto: 'Airea el suelo cuando baje el agua', oneShot: true },
+  incendio_proximo: { emoji: '🔥', nombre: 'Incendio', acciones: ['riego', 'inundacion', 'lluvia_torrencial', 'nevada'], accionTexto: 'Riega, lanza un tsunami, una lluvia torrencial o una nevada para apagarlo' },
+  inundacion: { emoji: '🌊', nombre: 'Tsunami', acciones: ['aireacion_suelo'], accionTexto: 'Airea el suelo cuando baje el agua', oneShot: true },
   tornado: { emoji: '🌀', nombre: 'Tornado', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase', oneShot: true },
   terremoto: { emoji: '🌍', nombre: 'Terremoto', acciones: ['aireacion_suelo'], accionTexto: 'Airea las raíces dañadas por la sacudida', oneShot: true },
   // El OVNI sólo se va con el cañón anti-OVNI. acciones=[] para que ningún
@@ -281,7 +292,7 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { tipo: 'inundacion', nombre: 'Tsunami', icono: '🌊' },
       { tipo: 'nevada', nombre: 'Nevada', icono: '🌨️' },
       { tipo: 'rayo_caido', nombre: 'Rayo', icono: '⚡' },
-      { tipo: 'incendio_proximo', nombre: 'Incendio próximo', icono: '🔥' },
+      { tipo: 'incendio_proximo', nombre: 'Incendio', icono: '🔥' },
       { tipo: 'niebla_persistente', nombre: 'Niebla densa', icono: '🌫️' },
       { tipo: 'polvo_sahariano', nombre: 'Calima', icono: '🏜️' },
       { tipo: 'lluvia_acida', nombre: 'Lluvia ácida', icono: '☢️' }
@@ -409,6 +420,16 @@ const SimulationView: React.FC = () => {
   const flashTimeoutsRef = useRef<Map<number, number>>(new Map());
   const knownEventoIdsRef = useRef<Set<number>>(new Set());
   const eventosInitialisedRef = useRef(false);
+  // Eventos cuya animación NUNCA debe reproducirse dos veces el mismo día.
+  // Si el jugador (o el sistema) intenta volver a disparar uno de ellos
+  // — tsunami, tornado, rayo, OVNI — `triggerFlash` ignora la petición
+  // hasta que se avance día. Esto evita que la pared de agua del tsunami
+  // o la coreografía de entrada del OVNI se relancen al aplicar otros
+  // eventos.
+  const NO_REPEAT_EVENTS_TODAY = React.useRef(new Set<string>([
+    'inundacion', 'tornado', 'rayo_caido', 'ola_radiacion_uv'
+  ])).current;
+  const firedNoRepeatTodayRef = useRef<Set<string>>(new Set());
 
   // Estado para nuevo evento
   const [nuevoEvento, setNuevoEvento] = useState<Partial<Evento>>({
@@ -438,6 +459,20 @@ const SimulationView: React.FC = () => {
     ).evento.tipoEvento as VFXEffect;
   }, [eventosActivosMemo]);
 
+  // baseVFXSetMemo = TODOS los persistentes activos (no solo el más reciente).
+  // Antes baseVFX era un solo valor, así que si tenías OVNI + sequía solo
+  // se veía la sequía y el OVNI desaparecía. Al resolver la sequía, el OVNI
+  // volvía a aparecer y su animación de entrada se reproducía de nuevo. Con
+  // un Set TODOS los persistentes permanecen montados a la vez y ningún
+  // componente se remonta por culpa de otro evento.
+  const baseVFXSetMemo: Set<string> = React.useMemo(() => {
+    const s = new Set<string>();
+    eventosActivosMemo.forEach(({ evento, info }) => {
+      if (!info.oneShot) s.add(evento.tipoEvento);
+    });
+    return s;
+  }, [eventosActivosMemo]);
+
   // sceneVFXSet = TODOS los efectos activos para la escena 3D (modelos 3D
   // pueden coexistir sin solaparse: ovni + tractor + fuego simultáneamente).
   // IMPORTANTE: este useMemo va aquí arriba — los hooks deben llamarse SIEMPRE
@@ -445,10 +480,10 @@ const SimulationView: React.FC = () => {
   const sceneVFXSet: Set<string> = React.useMemo(() => {
     const s = new Set<string>();
     flashes.forEach(f => s.add(f.effect));
-    if (baseVFXMemo) s.add(baseVFXMemo);
+    baseVFXSetMemo.forEach(e => s.add(e));
     aftermathSet.forEach(e => s.add(e));
     return s;
-  }, [flashes, baseVFXMemo, aftermathSet]);
+  }, [flashes, baseVFXSetMemo, aftermathSet]);
 
   // Clima ambiental derivado de los eventos activos. Cambia los doodles dibujados
   // en las paredes del cubo de papel (sol, gotas, copos…).
@@ -531,6 +566,13 @@ const SimulationView: React.FC = () => {
   // Dispara un flash temporal. Múltiples flashes pueden coexistir; cada uno
   // tiene su propio setTimeout y se borra de la cola cuando expira.
   const triggerFlash = React.useCallback((effect: VFXEffect) => {
+    // Tsunami / tornado / rayo / OVNI: una sola animación por día. Si se
+    // intenta lanzar otra (re-aplicado por el usuario o spawn casual del
+    // sistema), salimos sin tocar el estado para no remontar el componente.
+    if (NO_REPEAT_EVENTS_TODAY.has(effect)) {
+      if (firedNoRepeatTodayRef.current.has(effect)) return;
+      firedNoRepeatTodayRef.current.add(effect);
+    }
     const durationMs = FLASH_DURATIONS_MS_MAP[effect] ?? DEFAULT_FLASH_MS;
     flashIdCounter.current += 1;
     const id = flashIdCounter.current;
@@ -549,14 +591,17 @@ const SimulationView: React.FC = () => {
       }
     }, durationMs);
     flashTimeoutsRef.current.set(id, handle);
-  }, [EVENTOS_CON_AFTERMATH]);
+  }, [EVENTOS_CON_AFTERMATH, NO_REPEAT_EVENTS_TODAY]);
 
   // Cancela todos los flashes en curso (y sus aftermath asociados) — se usa al
-  // avanzar día, para amanecer con la "página en blanco".
+  // avanzar día, para amanecer con la "página en blanco". También resetea el
+  // ref de "ya disparado hoy" para que el día siguiente vuelvan a poder
+  // dispararse tsunami / tornado / rayo / OVNI si reaparecen.
   const clearAllFlashes = React.useCallback(() => {
     flashTimeoutsRef.current.forEach(h => window.clearTimeout(h));
     flashTimeoutsRef.current.clear();
     setFlashes([]);
+    firedNoRepeatTodayRef.current.clear();
   }, []);
 
   // Cleanup al desmontar — evita timeouts huérfanos que disparen setState en
@@ -775,7 +820,26 @@ const SimulationView: React.FC = () => {
       );
       const resuelveActivoActual = tiposResueltos.size > 0;
 
+      // === Fusión: rayo caído sobre sequía → genera un incendio próximo ===
+      // Si el jugador suelta un rayo y la parcela está reseca, las brasas
+      // prenden el cultivo. Persistimos el evento incendio EN el mismo día
+      // (origen=sistema, marcado como provocado por el rayo) y luego
+      // recargamos una sola vez para que ambos eventos aparezcan.
+      const sequiaActiva = eventosActivosMemo.some(a => a.evento.tipoEvento === 'sequia');
+      const fusionFire = tipoAplicado === 'rayo_caido' && sequiaActiva;
+
       await simulacionService.aplicarEvento(parseInt(id), eventoData);
+      if (fusionFire) {
+        try {
+          await simulacionService.aplicarEvento(parseInt(id), {
+            tipoEvento: 'incendio_proximo',
+            diaEvento: simulacion?.diaActual || 1,
+            origen: 'sistema' as OrigenEvento,
+            intensidad: 'moderado',
+            descripcion: 'Incendio provocado por un rayo durante la sequía'
+          });
+        } catch { /* si falla la fusión, seguimos con el rayo a secas */ }
+      }
       await loadSimulationData();
       closeEventModal();
       setNuevoEvento({
@@ -790,6 +854,12 @@ const SimulationView: React.FC = () => {
         // Antes la suprimíamos cuando resolvía un evento, pero el jugador no
         // veía feedback de su acción.
         triggerFlash(tipoAplicado as VFXEffect);
+        // Si la fusión disparó un incendio, lo encadenamos detrás con un
+        // pequeño retardo para que el efecto del rayo se vea primero y luego
+        // arranque el fuego.
+        if (fusionFire) {
+          window.setTimeout(() => triggerFlash('incendio_proximo' as VFXEffect), 800);
+        }
 
         if (resuelveActivoActual) {
           // Los eventos resueltos se mantienen visibles durante la duración

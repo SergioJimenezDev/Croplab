@@ -6,6 +6,69 @@ interface EventEffectsProps {
   event: Evento;
 }
 
+// Nombres bonitos por tipo (para no mostrar nunca el identificador con "_" en la UI).
+// Si un tipo nuevo no aparece aquí, getEventName() lo formatea capitalizando y
+// reemplazando "_" por espacios.
+const NOMBRES_EVENTO: { [key: string]: string } = {
+  sequia: 'Sequía',
+  helada: 'Helada',
+  ola_calor: 'Ola de calor',
+  lluvia_torrencial: 'Lluvia torrencial',
+  granizo: 'Granizo',
+  viento_fuerte: 'Viento fuerte',
+  plaga: 'Plaga',
+  enfermedad: 'Enfermedad',
+  malas_hierbas: 'Malas hierbas',
+  riego: 'Riego',
+  fertilizacion: 'Fertilización',
+  tratamiento_fitosanitario: 'Tratamiento fitosanitario',
+  poda: 'Poda',
+  cosecha: 'Cosecha',
+  terremoto: 'Terremoto',
+  tornado: 'Tornado',
+  inundacion: 'Tsunami',
+  nevada: 'Nevada',
+  rayo_caido: 'Rayo',
+  incendio_proximo: 'Incendio',
+  niebla_persistente: 'Niebla densa',
+  polvo_sahariano: 'Calima sahariana',
+  lluvia_acida: 'Lluvia ácida',
+  erosion_suelo: 'Erosión del suelo',
+  salinizacion: 'Salinización',
+  acidificacion_suelo: 'Acidificación del suelo',
+  roya: 'Roya',
+  mildiu: 'Mildiu',
+  oidio: 'Oídio',
+  virus_mosaico: 'Virus del mosaico',
+  pulgones: 'Pulgones',
+  arana_roja: 'Araña roja',
+  caracoles: 'Caracoles',
+  nematodos: 'Nematodos',
+  aves_plaga: 'Bandadas de aves',
+  jabalies: 'Jabalíes',
+  langostas: 'Langostas',
+  apagon_riego: 'Apagón de riego',
+  contaminacion_quimica: 'Contaminación química',
+  marabunta_hormigas: 'Marabunta de hormigas',
+  ola_radiacion_uv: 'Radiación UV alta',
+  mulching: 'Mulching',
+  control_biologico: 'Control biológico',
+  enmienda_calcica: 'Enmienda cálcica',
+  instalacion_malla: 'Instalación de malla',
+  compostaje: 'Compostaje',
+  aireacion_suelo: 'Aireación del suelo',
+  meteorito: 'Meteorito',
+  bomba_nuclear: 'Bomba nuclear',
+  zombies: 'Zombis'
+};
+
+export const getEventName = (tipoEvento: string): string => {
+  if (NOMBRES_EVENTO[tipoEvento]) return NOMBRES_EVENTO[tipoEvento];
+  // Fallback: reemplaza "_" por espacios y capitaliza la primera letra
+  const limpio = tipoEvento.replace(/_/g, ' ');
+  return limpio.charAt(0).toUpperCase() + limpio.slice(1);
+};
+
 const getEventIcon = (tipoEvento: string): string => {
   const icons: { [key: string]: string } = {
     sequia: '☀️',
@@ -390,7 +453,7 @@ export const EventEffects: React.FC<EventEffectsProps> = ({ event }) => {
       <div className="event-effects-header">
         <span className="event-icon">{icon}</span>
         <div className="event-info">
-          <h4>{event.descripcion || event.tipoEvento}</h4>
+          <h4>{event.descripcion || getEventName(event.tipoEvento)}</h4>
           <div className="event-meta">
             <span className="event-day">Día {event.diaEvento}</span>
             {event.intensidad && (
