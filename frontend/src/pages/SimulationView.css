@@ -2186,6 +2186,22 @@
 .sim-v2-perso-pill.invencible { background: rgba(98, 135, 230, 0.6); border-color: rgba(155, 180, 255, 0.7); }
 .sim-v2-perso-pill.dinero { background: rgba(229, 161, 53, 0.6); border-color: rgba(255, 200, 100, 0.7); }
 
+/* Botón de ACCIÓN (no toggle) — limpiar afecciones. Mismo layout que un
+   toggle pero el pill no muestra ON/OFF sino la etiqueta de acción. */
+.sim-v2-perso-toggle.sim-v2-perso-action {
+  background: rgba(72, 50, 80, 0.6);
+  border-color: rgba(200, 140, 220, 0.45);
+}
+.sim-v2-perso-toggle.sim-v2-perso-action:hover {
+  background: rgba(100, 70, 115, 0.78);
+}
+.sim-v2-perso-pill.action {
+  background: rgba(180, 110, 220, 0.65);
+  border-color: rgba(220, 170, 255, 0.7);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
 /* Badge del modo actual ("Todos" / "Modo realista" / "Personalizado") */
 .sim-v2-perso-mode-badge {
   font-size: 0.72rem;

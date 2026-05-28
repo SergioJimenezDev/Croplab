@@ -98,6 +98,19 @@ const EVENTOS_PERSISTENTES: Partial<Record<TipoEvento, EventoActivoInfo>> = {
   lluvia_acida: { emoji: '☢️', nombre: 'Lluvia ácida', acciones: ['enmienda_calcica', 'riego'], accionTexto: 'Aplica enmienda cálcica y riega para lavar las hojas' },
   sequia: { emoji: '☀️', nombre: 'Sequía', acciones: ['riego'], accionTexto: 'Riega abundantemente' },
   ola_calor: { emoji: '🔥', nombre: 'Ola de calor', acciones: ['riego', 'mulching'], accionTexto: 'Riega y considera mulching para retener humedad' },
+
+  // Climáticos transitorios — pasan en pocos días pero conviene mostrarlos
+  // mientras la ventana activa los considere recientes.
+  lluvia_torrencial: { emoji: '🌧️', nombre: 'Lluvia torrencial', acciones: [], accionTexto: 'El suelo queda saturado al 100%; se irá secando solo' },
+  granizo: { emoji: '🧊', nombre: 'Granizo', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase' },
+  viento_fuerte: { emoji: '💨', nombre: 'Viento fuerte', acciones: [], accionTexto: 'Espera a que amaine' },
+  helada: { emoji: '❄️', nombre: 'Helada', acciones: [], accionTexto: 'Espera a que el frío remita' },
+  nevada: { emoji: '🌨️', nombre: 'Nevada', acciones: [], accionTexto: 'Espera al deshielo' },
+  rayo_caido: { emoji: '⚡', nombre: 'Rayo caído', acciones: ['tratamiento_fitosanitario'], accionTexto: 'Aplica tratamiento para mitigar el estrés' },
+  incendio_proximo: { emoji: '🔥', nombre: 'Incendio próximo', acciones: ['riego'], accionTexto: 'Riega para limpiar cenizas y refrescar' },
+  inundacion: { emoji: '🌊', nombre: 'Tsunami / inundación', acciones: ['aireacion_suelo'], accionTexto: 'Airea el suelo cuando baje el agua' },
+  tornado: { emoji: '🌀', nombre: 'Tornado', acciones: [], accionTexto: 'El daño físico ya está hecho; espera a que pase' },
+  terremoto: { emoji: '🌍', nombre: 'Terremoto', acciones: ['aireacion_suelo'], accionTexto: 'Airea las raíces dañadas por la sacudida' },
   // El OVNI sólo se va con el cañón anti-OVNI. acciones=[] para que ningún
   // riego ni malla lo resuelva por el flujo normal; la "resolución" se hace
   // localmente añadiendo el idEvento al set ovnisDerribadosIds (persistido en
@@ -130,6 +143,30 @@ interface EventoActivo {
   evento: Evento;
   info: EventoActivoInfo;
 }
+
+// Algunos eventos llevan una coreografía 3D más larga (rayos múltiples,
+// terremoto con sacudida sostenida, destrucción total...) y necesitan más
+// tiempo de flash para que la animación termine antes de que se desactive.
+// Constante a nivel de módulo para que triggerFlash pueda consultarla.
+const FLASH_DURATIONS_MS_MAP: Partial<Record<string, number>> = {
+  rayo_caido: 6000,
+  terremoto: 5000,
+  inundacion: 5000,
+  ola_radiacion_uv: 7000,
+  plaga: 5000,
+  pulgones: 5000,
+  arana_roja: 5000,
+  caracoles: 5000,
+  langostas: 5000,
+  marabunta_hormigas: 5000,
+  // Destrucción total
+  meteorito: 8000,
+  bomba_nuclear: 9000,
+  zombies: 9000,
+  // Cañón anti-OVNI (acción visual local, no se persiste como tal)
+  derribar_ovni: 7000
+};
+const DEFAULT_FLASH_MS = 4000;
 
 const calcularEventosActivos = (eventos: Evento[], diaActual: number): EventoActivo[] => {
   const activos: EventoActivo[] = [];
@@ -307,11 +344,15 @@ const SimulationView: React.FC = () => {
   // para excluirlo de eventosActivosMemo. localStorage por id de simulación
   // para que sobreviva a recargas. Cuando aparezca un OVNI NUEVO tendrá un
   // idEvento distinto y volverá a salir activo (y el cañón disponible).
-  const ovnisStorageKey = id ? `croplab_ovnis_derribados_${id}` : null;
-  const [ovnisDerribadosIds, setOvnisDerribadosIds] = useState<Set<number>>(() => {
-    if (!ovnisStorageKey) return new Set();
+  // Eventos "ignorados localmente": el jugador los ha resuelto desde el frontend
+  // (derribar OVNI, limpiar afecciones...) sin tocar backend. Sus idEvento se
+  // excluyen de eventosActivosMemo. Se persisten por simulación en localStorage
+  // para que sobrevivan a recargas.
+  const eventosIgnoradosKey = id ? `croplab_eventos_ignorados_${id}` : null;
+  const [eventosIgnoradosIds, setEventosIgnoradosIds] = useState<Set<number>>(() => {
+    if (!eventosIgnoradosKey) return new Set();
     try {
-      const raw = window.localStorage.getItem(ovnisStorageKey);
+      const raw = window.localStorage.getItem(eventosIgnoradosKey);
       if (!raw) return new Set();
       const arr = JSON.parse(raw) as number[];
       return new Set(arr);
@@ -320,11 +361,11 @@ const SimulationView: React.FC = () => {
     }
   });
   useEffect(() => {
-    if (!ovnisStorageKey) return;
+    if (!eventosIgnoradosKey) return;
     try {
-      window.localStorage.setItem(ovnisStorageKey, JSON.stringify(Array.from(ovnisDerribadosIds)));
+      window.localStorage.setItem(eventosIgnoradosKey, JSON.stringify(Array.from(eventosIgnoradosIds)));
     } catch { /* quota / privacy mode → ignorar */ }
-  }, [ovnisDerribadosIds, ovnisStorageKey]);
+  }, [eventosIgnoradosIds, eventosIgnoradosKey]);
 
   // Cierra el modal con animación de salida (~280 ms)
   const closeEventModal = () => {
@@ -337,12 +378,21 @@ const SimulationView: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<'detalles' | 'alertas' | 'graficos' | 'eventos' | 'economia'>('alertas');
   const [sidePanelOpen, setSidePanelOpen] = useState<boolean>(true);
   const [sidePanelFullscreen, setSidePanelFullscreen] = useState<boolean>(false);
-  // VFX en dos capas:
-  //  - flashVFX: efecto temporal (4 s) que aparece al disparar un evento concreto
-  //    (acción del usuario, o catástrofe puntual del sistema). Tiene prioridad.
+  // VFX en TRES capas, ya con soporte de SIMULTÁNEOS para la escena 3D:
+  //  - flashes (queue): efectos temporales acumulables (acción del usuario,
+  //    catástrofe puntual del sistema, cañón anti-OVNI...). Cada flash tiene
+  //    su propio temporizador; pueden coexistir varios al mismo tiempo y la
+  //    escena 3D los muestra en paralelo. La capa 2D (EventVFX) sólo lleva el
+  //    más reciente para no saturar la pantalla con partículas solapadas.
   //  - baseVFX: efecto continuo correspondiente al evento ACTIVO más reciente.
   //    Se reproduce en bucle mientras haya algún problema persistente sin resolver.
-  const [flashVFX, setFlashVFX] = useState<VFXEffect | null>(null);
+  //  - aftermathSet: set de eventos destructivos cuya secuela visual sigue en
+  //    pantalla tras terminar su flash, hasta que avances día.
+  type FlashEntry = { id: number; effect: VFXEffect; expiresAt: number };
+  const [flashes, setFlashes] = useState<FlashEntry[]>([]);
+  const [aftermathSet, setAftermathSet] = useState<Set<VFXEffect>>(new Set());
+  const flashIdCounter = useRef(0);
+  const flashTimeoutsRef = useRef<Map<number, number>>(new Map());
   const knownEventoIdsRef = useRef<Set<number>>(new Set());
   const eventosInitialisedRef = useRef(false);
 
@@ -359,8 +409,8 @@ const SimulationView: React.FC = () => {
   const eventosActivosMemo = React.useMemo(
     () => calcularEventosActivos(eventos, simulacion?.diaActual ?? 0)
       // Excluimos OVNIs que el jugador ya derribó con el cañón (resolución local).
-      .filter(({ evento }) => evento.idEvento == null || !ovnisDerribadosIds.has(evento.idEvento)),
-    [eventos, simulacion?.diaActual, ovnisDerribadosIds]
+      .filter(({ evento }) => evento.idEvento == null || !eventosIgnoradosIds.has(evento.idEvento)),
+    [eventos, simulacion?.diaActual, eventosIgnoradosIds]
   );
   const baseVFXMemo: VFXEffect | null = React.useMemo(() => {
     if (eventosActivosMemo.length === 0) return null;
@@ -368,6 +418,18 @@ const SimulationView: React.FC = () => {
       (m, e) => e.evento.diaEvento > m.evento.diaEvento ? e : m
     ).evento.tipoEvento as VFXEffect;
   }, [eventosActivosMemo]);
+
+  // sceneVFXSet = TODOS los efectos activos para la escena 3D (modelos 3D
+  // pueden coexistir sin solaparse: ovni + tractor + fuego simultáneamente).
+  // IMPORTANTE: este useMemo va aquí arriba — los hooks deben llamarse SIEMPRE
+  // en el mismo orden, sin early returns por encima.
+  const sceneVFXSet: Set<string> = React.useMemo(() => {
+    const s = new Set<string>();
+    flashes.forEach(f => s.add(f.effect));
+    if (baseVFXMemo) s.add(baseVFXMemo);
+    aftermathSet.forEach(e => s.add(e));
+    return s;
+  }, [flashes, baseVFXMemo, aftermathSet]);
 
   // Clima ambiental derivado de los eventos activos. Cambia los doodles dibujados
   // en las paredes del cubo de papel (sol, gotas, copos…).
@@ -436,6 +498,59 @@ const SimulationView: React.FC = () => {
     loadSimulationData();
   }, [id]);
 
+  // Eventos cuya secuela visual (plantas espachurradas, suelo inundado,
+  // restos del OVNI estrellado, nieve en el terreno...) debe quedarse en pantalla
+  // hasta que el jugador avance día o aplique la acción correctora. NO incluimos
+  // acciones de manejo (riego, poda...) ni plagas (sus bichitos ya se van solos).
+  const EVENTOS_CON_AFTERMATH = React.useRef(new Set<string>([
+    'inundacion', 'incendio_proximo', 'tornado', 'granizo', 'terremoto',
+    'rayo_caido', 'nevada', 'helada', 'viento_fuerte', 'lluvia_torrencial',
+    'lluvia_acida', 'derribar_ovni',
+    'meteorito', 'bomba_nuclear', 'zombies'
+  ])).current;
+
+  // Dispara un flash temporal. Múltiples flashes pueden coexistir; cada uno
+  // tiene su propio setTimeout y se borra de la cola cuando expira.
+  const triggerFlash = React.useCallback((effect: VFXEffect) => {
+    const durationMs = FLASH_DURATIONS_MS_MAP[effect] ?? DEFAULT_FLASH_MS;
+    flashIdCounter.current += 1;
+    const id = flashIdCounter.current;
+    const expiresAt = Date.now() + durationMs;
+    setFlashes(prev => [...prev, { id, effect, expiresAt }]);
+    const handle = window.setTimeout(() => {
+      flashTimeoutsRef.current.delete(id);
+      setFlashes(prev => prev.filter(f => f.id !== id));
+      if (EVENTOS_CON_AFTERMATH.has(effect)) {
+        setAftermathSet(prev => {
+          if (prev.has(effect)) return prev;
+          const next = new Set(prev);
+          next.add(effect);
+          return next;
+        });
+      }
+    }, durationMs);
+    flashTimeoutsRef.current.set(id, handle);
+  }, [EVENTOS_CON_AFTERMATH]);
+
+  // Cancela todos los flashes en curso (y sus aftermath asociados) — se usa al
+  // avanzar día, para amanecer con la "página en blanco".
+  const clearAllFlashes = React.useCallback(() => {
+    flashTimeoutsRef.current.forEach(h => window.clearTimeout(h));
+    flashTimeoutsRef.current.clear();
+    setFlashes([]);
+  }, []);
+
+  // Cleanup al desmontar — evita timeouts huérfanos que disparen setState en
+  // un componente ya inexistente.
+  useEffect(() => () => {
+    flashTimeoutsRef.current.forEach(h => window.clearTimeout(h));
+    flashTimeoutsRef.current.clear();
+  }, []);
+
+  // No-op para EventVFX (cada flash tiene su propio temporizador, no necesita
+  // ser notificado desde fuera para limpiarse).
+  const handleVfxFinish = React.useCallback(() => {}, []);
+
   // Detecta eventos PUNTUALES nuevos del sistema (no persistentes) → flash 4s.
   // Los persistentes no se manejan aquí; se reflejan continuamente vía baseVFX.
   // IMPORTANTE: la inicialización del set de eventos "conocidos" se hace en
@@ -455,34 +570,9 @@ const SimulationView: React.FC = () => {
       if (!puntualMasReciente || ev.diaEvento > puntualMasReciente.diaEvento) puntualMasReciente = ev;
     });
     if (puntualMasReciente) {
-      setFlashVFX((puntualMasReciente as Evento).tipoEvento as VFXEffect);
+      triggerFlash((puntualMasReciente as Evento).tipoEvento as VFXEffect);
     }
-  }, [eventos]);
-
-  // Eventos cuya secuela visual (plantas espachurradas, suelo inundado,
-  // restos del OVNI estrellado, nieve en el terreno...) debe quedarse en pantalla
-  // hasta que el jugador avance día o aplique la acción correctora. NO incluimos
-  // acciones de manejo (riego, poda...) ni plagas (sus bichitos ya se van solos).
-  const EVENTOS_CON_AFTERMATH = React.useRef(new Set<string>([
-    'inundacion', 'incendio_proximo', 'tornado', 'granizo', 'terremoto',
-    'rayo_caido', 'nevada', 'helada', 'viento_fuerte', 'lluvia_torrencial',
-    'lluvia_acida', 'derribar_ovni',
-    'meteorito', 'bomba_nuclear', 'zombies'
-  ])).current;
-
-  const [aftermathVfx, setAftermathVfx] = useState<VFXEffect | null>(null);
-
-  const handleVfxFinish = () => {
-    // Al terminar el flash, si el efecto era destructivo, lo dejamos cocinado
-    // en `aftermathVfx`. La escena 3D seguirá viéndolo (plantas espachurradas,
-    // OVNI estrellado, etc.) pero las partículas 2D de EventVFX paran porque
-    // ese consumidor sólo mira flashVFX ?? baseVFX.
-    const just = flashVFX;
-    setFlashVFX(null);
-    if (just && EVENTOS_CON_AFTERMATH.has(just)) {
-      setAftermathVfx(just);
-    }
-  };
+  }, [eventos, triggerFlash]);
 
   const loadSimulationData = async () => {
     if (!id) return;
@@ -521,12 +611,11 @@ const SimulationView: React.FC = () => {
     if (!id || !simulacion) return;
 
     setIsAdvancing(true);
-    // Cancelar inmediatamente cualquier flash del día anterior — si no, su
-    // timer interno de 4 s sigue corriendo y las partículas/efectos del
-    // evento ya pasado se ven durante un par de segundos en el día nuevo.
-    setFlashVFX(null);
+    // Cancelar inmediatamente cualquier flash del día anterior — si no, sus
+    // timers internos siguen corriendo y se ven en el día nuevo.
+    clearAllFlashes();
     // Avanzar día también limpia el aftermath: amanece "página en blanco".
-    setAftermathVfx(null);
+    setAftermathSet(new Set());
     try {
       const nuevoEstado = await simulacionService.avanzarDia(parseInt(id));
       await loadSimulationData();
@@ -541,8 +630,8 @@ const SimulationView: React.FC = () => {
     if (!id) return;
 
     setIsAdvancing(true);
-    setFlashVFX(null);
-    setAftermathVfx(null);
+    clearAllFlashes();
+    setAftermathSet(new Set());
     try {
       // Una sola petición HTTP en lugar de N (evita el cold start + latencia × N)
       await simulacionService.avanzarVariosDias(parseInt(id), dias);
@@ -573,7 +662,7 @@ const SimulationView: React.FC = () => {
       await loadSimulationData();
       // Cerramos el panel de personalización para que el VFX se vea sin estorbo.
       setPersonalizacionAbierta(false);
-      setFlashVFX(tipo as VFXEffect);
+      triggerFlash(tipo as VFXEffect);
     } catch (error: any) {
       alert(error.message || 'Error al aplicar destrucción');
     } finally {
@@ -592,14 +681,14 @@ const SimulationView: React.FC = () => {
   const derribarOvni = () => {
     if (derribandoOvni) return;
     setDerribandoOvni(true);
-    setFlashVFX('derribar_ovni' as VFXEffect);
+    triggerFlash('derribar_ovni' as VFXEffect);
     // Marca todos los OVNIs activos ahora mismo como derribados (lo normal es
     // que haya uno solo; si por algún motivo hubiera varios, caen todos a la vez).
     const ovnisActivos = eventosActivosMemo
       .filter(({ evento }) => evento.tipoEvento === 'ola_radiacion_uv' && evento.idEvento != null)
       .map(({ evento }) => evento.idEvento as number);
     if (ovnisActivos.length > 0) {
-      setOvnisDerribadosIds(prev => {
+      setEventosIgnoradosIds(prev => {
         const next = new Set(prev);
         ovnisActivos.forEach(id => next.add(id));
         return next;
@@ -607,6 +696,27 @@ const SimulationView: React.FC = () => {
     }
     // Pequeño debounce para evitar dobles clics durante la animación
     window.setTimeout(() => setDerribandoOvni(false), 1200);
+  };
+
+  // ============================================================
+  // Limpiar todas las afecciones — botón "panic" en personalización.
+  // Mata cualquier flash en curso, vacía el aftermath, y marca como ignorados
+  // localmente todos los eventos activos (plagas, OVNI, sequía, etc.). Todo
+  // 100% local: no toca backend, sobrevive a recargas vía localStorage.
+  // ============================================================
+  const limpiarTodasAfecciones = () => {
+    clearAllFlashes();
+    setAftermathSet(new Set());
+    const idsActivos = eventosActivosMemo
+      .map(({ evento }) => evento.idEvento)
+      .filter((id): id is number => id != null);
+    if (idsActivos.length > 0) {
+      setEventosIgnoradosIds(prev => {
+        const next = new Set(prev);
+        idsActivos.forEach(id => next.add(id));
+        return next;
+      });
+    }
   };
 
   const aplicarEvento = async () => {
@@ -644,11 +754,11 @@ const SimulationView: React.FC = () => {
       if (tipoAplicado) {
         if (!resuelveActivoActual) {
           // Acción manual sin resolver nada: mostrar flash temporal de feedback.
-          setFlashVFX(tipoAplicado as VFXEffect);
+          triggerFlash(tipoAplicado as VFXEffect);
         } else {
-          // La acción resolvió un evento → forzamos también flashVFX a null por
-          // si quedaba un flash anterior pendiente, así la transición es limpia.
-          setFlashVFX(null);
+          // La acción resolvió un evento → limpiamos cualquier flash en curso
+          // para que la transición sea limpia.
+          clearAllFlashes();
         }
         // Si el evento aplicado es persistente (plaga, sequía, enfermedad...), abrir el
         // panel de alertas en la pestaña "Alertas" para que el usuario lo vea de inmediato.
@@ -795,37 +905,14 @@ const SimulationView: React.FC = () => {
   // Aquí simplemente accedemos a los memos definidos al principio del componente.
   const eventosActivosNow = eventosActivosMemo;
   const baseVFX: VFXEffect | null = baseVFXMemo;
-  // El flash temporal tiene prioridad; cuando termina, vuelve el base (o null).
   // currentVFX = lo que se ve en el HUD 2D (partículas, lluvia, granizo...).
-  // sceneVFX = lo que se le pasa a la escena 3D — incluye aftermath para que
-  // las plantas y los efectos persistan tras terminar el flash, hasta que el
-  // jugador avance día o aplique la acción correctora.
-  const currentVFX: VFXEffect | null = flashVFX ?? baseVFX;
-  const sceneVFX: VFXEffect | null = currentVFX ?? aftermathVfx;
-  // Algunos eventos llevan una coreografía 3D más larga (rayos múltiples,
-  // terremoto con sacudida sostenida...) y necesitan más tiempo de flash
-  // para que la animación termine antes de que se desactive.
-  const FLASH_DURATIONS_MS: Partial<Record<string, number>> = {
-    rayo_caido: 6000,
-    terremoto: 5000,
-    inundacion: 5000,
-    ola_radiacion_uv: 7000,
-    plaga: 5000,
-    pulgones: 5000,
-    arana_roja: 5000,
-    caracoles: 5000,
-    langostas: 5000,
-    marabunta_hormigas: 5000,
-    // Destrucción total — coreografías largas y muy llamativas
-    meteorito: 8000,
-    bomba_nuclear: 9000,
-    zombies: 9000,
-    // Acción visual ficticia (cañón anti-OVNI). El evento que se persiste sigue
-    // siendo 'instalacion_malla'; este flash es sólo la coreografía 3D.
-    derribar_ovni: 7000
-  };
-  const currentVFXDuration: number | null = flashVFX
-    ? (FLASH_DURATIONS_MS[flashVFX] ?? 4000)
+  // Sólo el flash MÁS RECIENTE (para no apilar partículas) + base como fallback.
+  const primaryFlashVFX: VFXEffect | null = flashes.length > 0
+    ? flashes[flashes.length - 1].effect
+    : null;
+  const currentVFX: VFXEffect | null = primaryFlashVFX ?? baseVFX;
+  const currentVFXDuration: number | null = primaryFlashVFX
+    ? (FLASH_DURATIONS_MS_MAP[primaryFlashVFX] ?? DEFAULT_FLASH_MS)
     : null;
 
   // Clases extra del root según el VFX activo: screen-shake y flash de pantalla
@@ -844,7 +931,8 @@ const SimulationView: React.FC = () => {
         <Suspense fallback={<div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#cfe7ff', color: '#1c2421', fontFamily: 'var(--font-hand, sans-serif)', fontSize: '1.5rem' }}>Cargando escena…</div>}>
           <FarmScene
             simulacion={simulacion}
-            vfxEvent={sceneVFX}
+            vfxEvent={primaryFlashVFX ?? baseVFX}
+            vfxEvents={sceneVFXSet}
             clima={climaEscena}
             eventosActivos={eventosBanderitas}
             hasMallas={tieneMallas}
@@ -1375,6 +1463,22 @@ const SimulationView: React.FC = () => {
                     <span className={`sim-v2-perso-pill ${dineroInfinitoOn ? 'dinero' : 'off'}`}>
                       {dineroInfinitoOn ? 'ON' : 'OFF'}
                     </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="sim-v2-perso-toggle sim-v2-perso-action"
+                    onClick={limpiarTodasAfecciones}
+                  >
+                    <span className="sim-v2-perso-toggle-icon">🧹</span>
+                    <span className="sim-v2-perso-toggle-body">
+                      <strong>Limpiar afecciones</strong>
+                      <small>
+                        Cancela todo lo que está pasando ahora (eventos activos,
+                        plagas, OVNI, animaciones en curso).
+                      </small>
+                    </span>
+                    <span className="sim-v2-perso-pill action">LIMPIAR</span>
                   </button>
                 </div>
               </section>

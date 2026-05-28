@@ -87,6 +87,11 @@ public class SimulacionService {
 
             if (Boolean.TRUE.equals(simulacion.getEventosAleatorios()) && random.nextDouble() < 0.25) {
                 Evento nuevo = construirEventoAleatorio(simulacion);
+                // Aplicar efectos reales del evento generado (humedad, salud,
+                // altura...) para que el estado del día siguiente parta de los
+                // nuevos valores. Sin esto, los eventos aleatorios se mostraban
+                // pero no afectaban a la simulación.
+                aplicarEfectosEvento(simulacion, nuevo);
                 eventosNuevos.add(nuevo);
                 eventosCache.add(nuevo);
             }
@@ -326,7 +331,13 @@ public class SimulacionService {
     }
 
     private void generarEventoAleatorio(Simulacion simulacion) {
-        eventoRepository.save(construirEventoAleatorio(simulacion));
+        Evento ev = construirEventoAleatorio(simulacion);
+        // Los eventos del sistema también deben modificar las stats reales de la
+        // simulación: una lluvia torrencial debe saturar el suelo, una sequía
+        // bajar la humedad, una plaga restar salud, etc. Antes solo se aplicaban
+        // los efectos cuando el usuario aplicaba el evento manualmente.
+        aplicarEfectosEvento(simulacion, ev);
+        eventoRepository.save(ev);
     }
 
     /** Construye un evento aleatorio sin persistirlo. Útil para batch en avanzarVariosDias. */
